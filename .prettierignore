@@ -1,0 +1,14 @@
+dist/
+coverage/
+node_modules/
+.wayfinder/
+package-lock.json
+public/data/
+SPEC.md
+GLOSSARY.md
+LOOP-PROMPT.md
+public/ort/
+public/models/
+.cache/
+playwright-report/
+test-results/

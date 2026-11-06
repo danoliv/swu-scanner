@@ -1,0 +1,14 @@
+node_modules/
+coverage/
+dist/
+.env
+.env.local
+Pictures/
+.wayfinder/photos/
+.wayfinder/
+LOOP-PROMPT.md
+public/data/
+.cache/
+public/models/
+playwright-report/
+test-results/

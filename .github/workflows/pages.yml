@@ -1,0 +1,82 @@
+name: Test e pubblicazione su GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '30 6 * * *' # il price guide Cardmarket si aggiorna ogni giorno
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run format
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:coverage
+
+  build:
+    # Dati e modelli veri, test e2e su viewport telefono, poi la build per Pages.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Scarica i dati (Catalogo swu-db, titoli ufficiali, Cardmarket)
+        run: npm run data:fetch
+      - name: Costruisci i dati e controlla l'integrità (si ferma se non passa)
+        run: npm run data:build
+      - name: Scarica i modelli di lettura (con verifica SHA-256)
+        run: npm run assets
+      - name: Installa il browser dei test e2e
+        run: npx playwright install --with-deps chromium
+      - name: Test e2e (viewport telefono, build di produzione)
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+      - name: Build del sito per GitHub Pages
+        run: npm run build
+        env:
+          VITE_BASE: /${{ github.event.repository.name }}/
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: dist
+
+  deploy:
+    # Si pubblica solo da main e solo a test verdi.
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

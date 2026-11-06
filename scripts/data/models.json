@@ -1,0 +1,40 @@
+{
+  "source": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6",
+  "license": "Apache-2.0 (PaddleOCR / RapidOCR)",
+  "models": {
+    "light": {
+      "label": "PP-OCRv6 tiny",
+      "files": [
+        {
+          "name": "PP-OCRv6_det_tiny.onnx",
+          "path": "det/PP-OCRv6_det_tiny.onnx",
+          "sha256": "f42c0fbd294d95eac1a550e131b277dac97462c8025fa4b6c3cec1b7894bd3d5",
+          "bytes": 1829618
+        },
+        {
+          "name": "PP-OCRv6_rec_tiny.onnx",
+          "path": "rec/PP-OCRv6_rec_tiny.onnx",
+          "sha256": "e16e242de5937ad92609223f19bc2aff3727ee40b095f996907c24749bad251b",
+          "bytes": 4489813
+        }
+      ]
+    },
+    "precise": {
+      "label": "PP-OCRv6 small",
+      "files": [
+        {
+          "name": "PP-OCRv6_det_small.onnx",
+          "path": "det/PP-OCRv6_det_small.onnx",
+          "sha256": "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f",
+          "bytes": 9929594
+        },
+        {
+          "name": "PP-OCRv6_rec_small.onnx",
+          "path": "rec/PP-OCRv6_rec_small.onnx",
+          "sha256": "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884",
+          "bytes": 21234383
+        }
+      ]
+    }
+  }
+}
