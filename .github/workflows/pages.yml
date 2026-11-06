@@ -41,7 +41,17 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # I dati cambiano una volta al giorno (price guide Cardmarket): la prima esecuzione del giorno li
+      # scarica (circa 15 minuti), le altre dello stesso giorno li riusano dalla cache.
+      - id: today
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - id: data-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: data-${{ steps.today.outputs.date }}
       - name: Scarica i dati (Catalogo swu-db, titoli ufficiali, Cardmarket)
+        if: steps.data-cache.outputs.cache-hit != 'true'
         run: npm run data:fetch
       - name: Costruisci i dati e controlla l'integrità (si ferma se non passa)
         run: npm run data:build

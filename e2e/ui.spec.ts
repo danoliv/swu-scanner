@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext } from '@playwright/test';
 import { FAKE_PHOTO, mockScanner, scanAndConfirmAll } from './helpers.ts';
 
 test.describe('più foto', () => {
@@ -16,8 +16,16 @@ test.describe('più foto', () => {
 });
 
 test.describe('data dei prezzi', () => {
-  test('si vede sempre e avvisa se i prezzi sono vecchi', async ({ page }) => {
+  /** La data dei prezzi pubblicati: dipende dai dati del giorno, quindi l'orologio si fissa rispetto a lei. */
+  async function priceDate(request: APIRequestContext): Promise<Date> {
+    const meta = (await (await request.get('/data/meta.json')).json()) as { priceDate: string };
+    return new Date(meta.priceDate);
+  }
+  const days = (d: Date, n: number): Date => new Date(d.getTime() + n * 86_400_000);
+
+  test('si vede sempre e avvisa se i prezzi sono vecchi', async ({ page, request }) => {
     await mockScanner(page);
+    await page.clock.install({ time: days(await priceDate(request), 10) });
     await page.goto('/');
     await expect(page.getByTestId('price-date')).toContainText('Prices of');
     await expect(page.getByTestId('price-date')).toContainText('days old');
@@ -27,9 +35,9 @@ test.describe('data dei prezzi', () => {
     await expect(page.getByTestId('price-date')).toBeVisible();
   });
 
-  test("con prezzi recenti non c'è nessun avviso", async ({ page }) => {
+  test("con prezzi recenti non c'è nessun avviso", async ({ page, request }) => {
     await mockScanner(page);
-    await page.clock.install({ time: new Date('2026-10-19T08:00:00Z') });
+    await page.clock.install({ time: days(await priceDate(request), 1) });
     await page.goto('/');
     await expect(page.getByTestId('price-date')).toContainText('Prices of');
     await expect(page.getByTestId('price-date')).not.toContainText('days old');
