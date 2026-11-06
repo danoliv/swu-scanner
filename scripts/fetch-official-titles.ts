@@ -86,8 +86,11 @@ async function getPage(
   throw new Error(`${locale} pagina ${page}: troppi errori, mi fermo`);
 }
 
-await mkdir(outDir, { recursive: true });
-for (const locale of locales) {
+const outputDir: string = outDir;
+await mkdir(outputDir, { recursive: true });
+
+/** Scarica tutte le pagine di una lingua (una richiesta alla volta, con pausa). */
+async function fetchLocale(locale: string): Promise<void> {
   const cards: object[] = [];
   let pageCount = 1;
   for (let page = 1; page <= pageCount; page++) {
@@ -120,7 +123,11 @@ for (const locale of locales) {
       console.log(`${locale}: pagina ${page}/${pageCount}, ${cards.length} carte`);
     await sleep(DELAY_MS);
   }
-  await writeFile(join(outDir, `${locale}.json`), JSON.stringify(cards));
+  await writeFile(join(outputDir, `${locale}.json`), JSON.stringify(cards));
   console.log(`${locale}: salvate ${cards.length} carte`);
 }
+
+// Le lingue si scaricano in parallelo: ognuna resta cortese (una richiesta alla volta, con pausa), ma
+// il tempo totale è quello di una lingua sola invece della somma (circa 10 minuti invece di 50).
+await Promise.all(locales.map((locale) => fetchLocale(locale)));
 console.log('fine');
