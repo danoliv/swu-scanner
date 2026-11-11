@@ -1,6 +1,8 @@
 // Esportazione e importazione CSV della Lista (SPEC §6). Formato: una riga per voce, UTF-8, virgole,
 // campi tra virgolette secondo RFC 4180; in lettura si accettano anche `;` e il BOM.
 
+import { isCardLanguage } from './languages.ts';
+
 export const CSV_COLUMNS = [
   'quantity',
   'name',
@@ -11,6 +13,7 @@ export const CSV_COLUMNS = [
   'finish',
   'idProduct',
   'price_eur',
+  'language',
 ] as const;
 
 export interface CsvListRow {
@@ -25,6 +28,8 @@ export interface CsvListRow {
   idProduct: number | null;
   /** Prezzo unitario in euro con il punto ("18.67"), o '' se non disponibile. */
   priceEur: string;
+  /** 'en', 'fr', 'de', 'es', 'it' o '' (non si sa). */
+  language: string;
 }
 
 /** Un campo che inizia con questi caratteri sarebbe una formula per Excel e Fogli Google. */
@@ -47,6 +52,7 @@ export function toCsv(rows: readonly CsvListRow[]): string {
       field(r.finish),
       r.idProduct === null ? '' : String(r.idProduct),
       r.priceEur,
+      field(r.language),
     ].join(','),
   );
   return [CSV_COLUMNS.join(','), ...lines].join('\r\n') + '\r\n';
@@ -134,6 +140,7 @@ export function parseListCsv(text: string): ParsedList {
       finish: finish === 'normal' || finish === 'foil' ? finish : '',
       idProduct: Number.isFinite(id) && id > 0 ? id : null,
       priceEur: get('price_eur'),
+      language: isCardLanguage(get('language').toLowerCase()) ? get('language').toLowerCase() : '',
     });
   }
   return { rows, errors };

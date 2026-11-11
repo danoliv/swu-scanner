@@ -1,5 +1,6 @@
 // La Lista dell'utente (SPEC §6): voci (Carta, versione, finitura) con quantità, operazioni immutabili
 // e totale. Una voce senza versione o con la finitura da scegliere è "da scegliere".
+import type { CardLanguage } from './languages.ts';
 import type { Finish } from './pricing.ts';
 
 /** Titolo e sottotitolo nella lingua della carta (se diversi da quelli inglesi del Catalogo). */
@@ -25,19 +26,26 @@ export interface ListEntry {
   /** Finitura scelta; null = da scegliere. */
   finish: Finish | null;
   quantity: number;
+  /** Lingua della carta (di chi la possiede); assente se non si sa. */
+  language?: CardLanguage;
   local?: LocalTitle;
   shared?: SharedPrice;
 }
 
 export type NewEntry = Pick<ListEntry, 'cardKey' | 'idProduct' | 'finish'> & {
+  language?: CardLanguage;
   local?: LocalTitle;
   shared?: SharedPrice;
 };
 
 const MAX_QUANTITY = 999;
 
+/** Due voci sono la stessa se hanno la stessa Carta, versione, finitura e lingua. */
 const sameVersion = (a: NewEntry, b: NewEntry): boolean =>
-  a.cardKey === b.cardKey && a.idProduct === b.idProduct && a.finish === b.finish;
+  a.cardKey === b.cardKey &&
+  a.idProduct === b.idProduct &&
+  a.finish === b.finish &&
+  (a.language ?? null) === (b.language ?? null);
 
 export function addEntry(
   list: readonly ListEntry[],
@@ -92,13 +100,23 @@ export function clearSharedPrices(list: readonly ListEntry[]): ListEntry[] {
 export function updateEntry(
   list: readonly ListEntry[],
   id: string,
-  patch: Partial<Pick<ListEntry, 'idProduct' | 'finish'>>,
+  patch: Partial<Pick<ListEntry, 'idProduct' | 'finish'>> & {
+    /** `null` toglie la lingua (non si sa). */
+    language?: CardLanguage | null;
+    /** Il titolo nella lingua scelta; `null` torna a quello inglese. */
+    local?: LocalTitle | null;
+  },
 ): ListEntry[] {
   const target = list.find((e) => e.id === id);
   if (!target) return [...list];
-  const changed: ListEntry = { ...target, ...patch };
-  // Con un'altra versione o finitura il prezzo ricevuto non vale più.
-  delete changed.shared;
+  const { language, local, ...rest } = patch;
+  const changed: ListEntry = { ...target, ...rest };
+  if (language === null) delete changed.language;
+  else if (language !== undefined) changed.language = language;
+  if (local === null) delete changed.local;
+  else if (local !== undefined) changed.local = local;
+  // Con un'altra versione o finitura il prezzo ricevuto non vale più (la lingua non lo cambia).
+  if (rest.idProduct !== undefined || rest.finish !== undefined) delete changed.shared;
   const twin = list.find((e) => e.id !== id && sameVersion(e, changed));
   if (!twin) return list.map((e) => (e.id === id ? changed : e));
   return list

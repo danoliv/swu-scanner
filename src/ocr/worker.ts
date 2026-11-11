@@ -33,7 +33,7 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>): Promise<void> => {
     const result = await scanPhoto(engine, photo, {
       catalog,
       detect: { ignoreTitles: IGNORE_TITLES },
-      onProgress: (stage) => post({ type: 'progress', id: msg.id, stage }),
+      onProgress: (progress) => post({ type: 'progress', id: msg.id, progress }),
     });
     msg.bitmap.close();
     post({ type: 'result', id: msg.id, cards: result.cards });

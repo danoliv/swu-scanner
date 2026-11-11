@@ -113,3 +113,31 @@ describe('buildLocalizedEntries', () => {
     expect(entries.map((e) => e.subtitle)).toEqual([null, null]);
   });
 });
+
+describe('lingue delle voci', () => {
+  it('lo stesso titolo in più lingue è una voce sola con tutte le lingue', () => {
+    const { entries } = buildLocalizedEntries(
+      [
+        rec('1', 'en', 'Battlefield Marine', null),
+        rec('1', 'de', 'Battlefield Marine', null),
+        rec('1', 'it', 'Battlefield Marine', null),
+        rec('1', 'fr', 'Marine du champ de bataille', null),
+      ],
+      [{ name: 'Battlefield Marine', subtitle: null }],
+    );
+    expect(entries).toHaveLength(2);
+    expect(entries.find((e) => e.name === 'Battlefield Marine')?.languages).toEqual([
+      'en',
+      'de',
+      'it',
+    ]);
+    expect(entries.find((e) => e.name.startsWith('Marine'))?.languages).toEqual(['fr']);
+  });
+  it('una lingua fuori dalle cinque non si aggiunge', () => {
+    const { entries } = buildLocalizedEntries(
+      [rec('1', 'en', 'Battlefield Marine', null), rec('1', 'pt', 'Marine', null)],
+      [{ name: 'Battlefield Marine', subtitle: null }],
+    );
+    expect(entries.find((e) => e.name === 'Marine')?.languages).toBeUndefined();
+  });
+});

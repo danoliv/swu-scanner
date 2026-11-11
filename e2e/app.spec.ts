@@ -142,7 +142,9 @@ test.describe('CSV', () => {
     let text = '';
     for await (const chunk of stream) text += String(chunk);
     const lines = text.trim().split('\r\n');
-    expect(lines[0]).toBe('quantity,name,subtitle,set,number,variant,finish,idProduct,price_eur');
+    expect(lines[0]).toBe(
+      'quantity,name,subtitle,set,number,variant,finish,idProduct,price_eur,language',
+    );
     expect(lines).toHaveLength(4);
   });
 

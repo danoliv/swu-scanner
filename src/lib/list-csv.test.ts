@@ -11,6 +11,7 @@ const row = (over: Partial<CsvListRow> = {}): CsvListRow => ({
   finish: 'foil',
   idProduct: 123456,
   priceEur: '18.67',
+  language: 'fr',
   ...over,
 });
 
@@ -19,7 +20,7 @@ describe('toCsv', () => {
     const lines = toCsv([row()]).trimEnd().split('\r\n');
     expect(lines[0]).toBe(CSV_COLUMNS.join(','));
     expect(lines[1]).toBe(
-      '2,Darth Vader,Dark Lord of the Sith,SOR,010,Hyperspace Foil,foil,123456,18.67',
+      '2,Darth Vader,Dark Lord of the Sith,SOR,010,Hyperspace Foil,foil,123456,18.67,fr',
     );
   });
 
@@ -31,9 +32,17 @@ describe('toCsv', () => {
 
   it('lascia vuoti set, numero e prodotto per le voci da scegliere', () => {
     const csv = toCsv([
-      row({ set: '', number: '', variant: '', finish: '', idProduct: null, priceEur: '' }),
+      row({
+        set: '',
+        number: '',
+        variant: '',
+        finish: '',
+        idProduct: null,
+        priceEur: '',
+        language: '',
+      }),
     ]);
-    expect(csv.trimEnd().split('\r\n')[1]).toBe('2,Darth Vader,Dark Lord of the Sith,,,,,,');
+    expect(csv.trimEnd().split('\r\n')[1]).toBe('2,Darth Vader,Dark Lord of the Sith,,,,,,,');
   });
 
   it('neutralizza le formule per i fogli di calcolo', () => {
@@ -118,5 +127,19 @@ describe('parseListCsv', () => {
 
   it('ignora una finitura sconosciuta', () => {
     expect(parseListCsv('name,finish\nLuke,sparkly\n').rows[0]?.finish).toBe('');
+  });
+});
+
+describe('lingua nel CSV', () => {
+  it('si scrive e si rilegge; una lingua sconosciuta diventa vuota', () => {
+    const back = parseListCsv(toCsv([row({ language: 'de' })]));
+    expect(back.rows[0]?.language).toBe('de');
+    const odd = parseListCsv(toCsv([row({ language: 'klingon' })]));
+    expect(odd.rows[0]?.language).toBe('');
+  });
+  it('un CSV senza la colonna (vecchio) si legge senza lingua', () => {
+    const old =
+      'quantity,name,subtitle,set,number,variant,finish,idProduct,price_eur\r\n1,Darth Vader,X,,,,,,\r\n';
+    expect(parseListCsv(old).rows[0]?.language).toBe('');
   });
 });

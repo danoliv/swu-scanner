@@ -20,6 +20,7 @@ import {
   type RawImage,
 } from './image.ts';
 import { readModelMetadata } from './onnx-meta.ts';
+import { passFraction } from './progress.ts';
 
 export interface PpocrModels {
   /** Il file ONNX del rilevatore e del lettore, come byte (scaricati dalla cache o da disco). */
@@ -132,10 +133,15 @@ export class PpocrEngine implements OcrEngine {
    * ruotata di 90° se il riquadro è verticale) e, se la fiducia è bassa, anche nel verso opposto.
    * `rotation` è il verso con cui la riga è stata letta, come per `readPhoto`.
    */
-  async recognizeAllOrientations(image: RawImage): Promise<TextLine[]> {
+  async recognizeAllOrientations(
+    image: RawImage,
+    onProgress?: (fraction: number) => void,
+  ): Promise<TextLine[]> {
     const out: TextLine[] = [];
-    for (const pass of this.passes) {
-      const lines = await this.recognizeOnce(rotateImage(image, pass));
+    for (const [index, pass] of this.passes.entries()) {
+      const lines = await this.recognizeOnce(rotateImage(image, pass), (line, total) =>
+        onProgress?.(passFraction(index, this.passes.length, line, total)),
+      );
       for (const l of lines) {
         out.push({
           ...l,
@@ -148,9 +154,14 @@ export class PpocrEngine implements OcrEngine {
   }
 
   /** Un rilevamento sull'immagine data, poi la lettura di ogni riga nel verso migliore. */
-  private async recognizeOnce(image: RawImage): Promise<TextLine[]> {
+  private async recognizeOnce(
+    image: RawImage,
+    onLine?: (line: number, lines: number) => void,
+  ): Promise<TextLine[]> {
     const lines: TextLine[] = [];
-    for (const { box, quad } of await this.detect(image)) {
+    const found = await this.detect(image);
+    for (const [i, { box, quad }] of found.entries()) {
+      onLine?.(i, found.length);
       const straight = warpQuadStraight(image, quad);
       const turned = isTall(straight);
       const upright = turned ? rotateImage(straight, 90) : straight;
@@ -168,6 +179,7 @@ export class PpocrEngine implements OcrEngine {
         rotation: ((base + (flipped ? 180 : 0)) % 360) as 0 | 90 | 180 | 270,
       });
     }
+    onLine?.(found.length, found.length);
     return lines;
   }
 }

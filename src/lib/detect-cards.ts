@@ -3,6 +3,7 @@
 // sottotitolo si cerca nelle righe subito sotto e centrate sul titolo.
 import type { TextLine } from '../ocr/engine.ts';
 import { upright, type Box, type Rotation } from './geometry.ts';
+import type { CardLanguage } from './languages.ts';
 import { makeMatcher, normalize, ocrKey, similarity } from './text-match.ts';
 
 export interface CatalogEntry {
@@ -10,6 +11,8 @@ export interface CatalogEntry {
   subtitle: string | null;
   /** Carta del Catalogo a cui appartiene questo nome (una Carta ha un nome per lingua). */
   ref?: { name: string; subtitle: string | null };
+  /** Lingue in cui la Carta ha proprio questo titolo e sottotitolo. */
+  languages?: CardLanguage[];
 }
 
 const refKey = (e: CatalogEntry): string => {
@@ -135,27 +138,53 @@ export function detectCards(
     const firstPerCard = entries.filter(
       (e, i) => entries.findIndex((x) => refKey(x) === refKey(e)) === i,
     );
-    if (firstPerCard.length === 1) {
-      return { status: 'recognized', candidates: firstPerCard, titleBox, rotation: rot };
-    }
     const titleUpright = upright(titleBox, rot);
-    let best: { entry: CatalogEntry; score: number } | null = null;
-    for (const other of lines) {
-      if (other === line || rotationOf(other) !== rot) continue;
-      if (!isBelowAndCentered(titleUpright, upright(other.box, rot))) continue;
-      for (const e of entries) {
-        if (!e.subtitle) continue;
-        const score = similarity(other.text, e.subtitle, key);
-        if (score >= subtitleThreshold && (!best || score > best.score)) best = { entry: e, score };
+    // Il sottotitolo letto sotto il titolo, confrontato con le voci date: la migliore, se basta.
+    const bestSubtitle = (
+      among: readonly CatalogEntry[],
+    ): { entry: CatalogEntry; score: number } | null => {
+      let best: { entry: CatalogEntry; score: number } | null = null;
+      for (const other of lines) {
+        if (other === line || rotationOf(other) !== rot) continue;
+        if (!isBelowAndCentered(titleUpright, upright(other.box, rot))) continue;
+        for (const e of among) {
+          if (!e.subtitle) continue;
+          const score = similarity(other.text, e.subtitle, key);
+          if (score >= subtitleThreshold && (!best || score > best.score))
+            best = { entry: e, score };
+        }
       }
+      return best;
+    };
+    /** La candidata con le lingue in cui la Carta ha questo titolo (e, se si legge, questo sottotitolo). */
+    const withLanguages = (candidate: CatalogEntry): CatalogEntry => {
+      const sameCard = entries.filter((e) => refKey(e) === refKey(candidate));
+      const bySubtitle = bestSubtitle(sameCard);
+      const languages = bySubtitle ? (bySubtitle.entry.languages ?? []) : unionLanguages(sameCard);
+      return languages.length > 0 ? { ...candidate, languages } : candidate;
+    };
+    if (firstPerCard.length === 1) {
+      const [only] = firstPerCard as [CatalogEntry];
+      const best = bestSubtitle(entries);
+      return {
+        status: 'recognized',
+        candidates: [best ? best.entry : withLanguages(only)],
+        titleBox,
+        rotation: rot,
+      };
     }
+    const best = bestSubtitle(entries);
     return best
       ? { status: 'recognized', candidates: [best.entry], titleBox, rotation: rot }
       : {
           status: 'choose',
-          candidates: firstPerCard.slice(0, maxCandidates),
+          candidates: firstPerCard.slice(0, maxCandidates).map(withLanguages),
           titleBox,
           rotation: rot,
         };
   });
 }
+
+const unionLanguages = (entries: readonly CatalogEntry[]): CardLanguage[] => [
+  ...new Set(entries.flatMap((e) => e.languages ?? [])),
+];

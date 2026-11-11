@@ -1,8 +1,8 @@
 // Lo scanner dell'interfaccia: parla con il Web Worker che esegue il motore di lettura.
 import type { CompactTitle } from '../lib/titles.ts';
-import type { ScanStage, WorkerRequest, WorkerResponse } from '../ocr/worker-protocol.ts';
+import type { ScanProgress } from '../ocr/progress.ts';
+import type { WorkerRequest, WorkerResponse } from '../ocr/worker-protocol.ts';
 import type { Scanner } from './app.ts';
-import type { MessageKey } from './messages.ts';
 
 export interface EngineHost {
   /** Carica il modello nel worker (sostituisce quello in uso solo a caricamento finito). */
@@ -10,12 +10,6 @@ export interface EngineHost {
   scanner: Scanner;
   readonly ready: boolean;
 }
-
-const STAGE_MESSAGE: Record<ScanStage, MessageKey> = {
-  read: 'scan.reading',
-  zoom: 'scan.lookingCloser',
-  done: 'scan.reading',
-};
 
 export function createEngineHost(opts: {
   worker: Worker;
@@ -31,7 +25,7 @@ export function createEngineHost(opts: {
     {
       resolve: (v: Awaited<ReturnType<Scanner['scan']>>) => void;
       reject: (e: Error) => void;
-      onProgress: (m: MessageKey) => void;
+      onProgress: (p: ScanProgress) => void;
     }
   >();
 
@@ -42,7 +36,7 @@ export function createEngineHost(opts: {
       onReady?.resolve();
       onReady = null;
     } else if (m.type === 'progress') {
-      pending.get(m.id)?.onProgress(STAGE_MESSAGE[m.stage]);
+      pending.get(m.id)?.onProgress(m.progress);
     } else if (m.type === 'result') {
       pending.get(m.id)?.resolve(m.cards);
       pending.delete(m.id);

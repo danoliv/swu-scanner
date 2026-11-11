@@ -1,8 +1,7 @@
 // Messaggi tra l'interfaccia e il Web Worker che esegue il motore di lettura.
 import type { DetectedCard } from '../lib/detect-cards.ts';
 import type { CompactTitle } from '../lib/titles.ts';
-
-export type ScanStage = 'read' | 'zoom' | 'done';
+import type { ScanProgress } from './progress.ts';
 
 export type WorkerRequest =
   | {
@@ -19,5 +18,5 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { type: 'ready' }
   | { type: 'error'; id?: number; message: string }
-  | { type: 'progress'; id: number; stage: ScanStage }
+  | { type: 'progress'; id: number; progress: ScanProgress }
   | { type: 'result'; id: number; cards: DetectedCard[] };

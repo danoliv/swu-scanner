@@ -38,6 +38,7 @@ describe('toShared / fromShared', () => {
         idProduct: 100,
         finish: 'normal',
         cardKey: null,
+        language: null,
         price: { cents: 1000, kind: 'trend', date: '2026-11-07T00:00:00+0100' },
       },
       {
@@ -45,6 +46,7 @@ describe('toShared / fromShared', () => {
         idProduct: 200,
         finish: 'foil',
         cardKey: null,
+        language: null,
         price: { cents: 2000, kind: 'low', date: '2026-11-07T00:00:00+0100' },
       },
       {
@@ -52,6 +54,7 @@ describe('toShared / fromShared', () => {
         idProduct: null,
         finish: null,
         cardKey: 'luke skywalker|jedi knight',
+        language: null,
         price: null,
       },
     ]);
@@ -90,8 +93,8 @@ describe('toShared / fromShared', () => {
     });
     // la finitura 2 non esiste (voce scartata); data o prezzo non validi lasciano la voce senza prezzo
     expect(odd).toEqual([
-      { quantity: 1, idProduct: 5, finish: 'normal', cardKey: null, price: null },
-      { quantity: 1, idProduct: 5, finish: 'foil', cardKey: null, price: null },
+      { quantity: 1, idProduct: 5, finish: 'normal', cardKey: null, language: null, price: null },
+      { quantity: 1, idProduct: 5, finish: 'foil', cardKey: null, language: null, price: null },
     ]);
   });
 });
@@ -136,5 +139,31 @@ describe('indirizzo', () => {
     expect(shareCodeFromHash('#list=1.abc')).toBe('1.abc');
     expect(shareCodeFromHash('#altro')).toBeNull();
     expect(shareCodeFromHash('')).toBeNull();
+  });
+});
+
+describe('lingua nel link', () => {
+  it('viaggia con la voce, con o senza prodotto', async () => {
+    const withProduct = entry({ language: 'fr' });
+    const noProduct = entry({
+      idProduct: null,
+      finish: null,
+      cardKey: 'luke skywalker|jedi knight',
+      language: 'it',
+    });
+    const none = entry({ idProduct: 7 });
+    const back = await decodeShare(
+      await encodeShare(toShared([withProduct, noProduct, none], priceOf, '2026-11-07')),
+    );
+    expect(back.map((b) => b.language)).toEqual(['fr', 'it', null]);
+    expect(back[1]?.cardKey).toBe('luke skywalker|jedi knight');
+    expect(back[0]?.cardKey).toBeNull();
+  });
+  it('una lingua che non esiste scarta la voce', () => {
+    expect(fromShared({ v: 1, d: ['2026-11-07'], i: [[1, 5, 0, 100, 0, 0, '', 9]] })).toEqual([]);
+  });
+  it('un link di prima, senza lingua, si legge ancora', () => {
+    const out = fromShared({ v: 1, d: ['2026-11-07'], i: [[1, null, null, null, 0, 0, 'a|b']] });
+    expect(out?.[0]).toMatchObject({ cardKey: 'a|b', language: null });
   });
 });

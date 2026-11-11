@@ -10,9 +10,8 @@ import { zoomCrop } from '../lib/zoom.ts';
 import type { OcrEngine, TextLine } from './engine.ts';
 import { rotateImage, unrotateBox, type RawImage } from './image.ts';
 import { isRawImage, rawPhotoSource, type PhotoSource } from './photo-source.ts';
+import { doneProgress, readProgress, zoomProgress, type ScanProgress } from './progress.ts';
 import { readPhoto } from './read-photo.ts';
-
-export type ScanStage = 'read' | 'zoom' | 'done';
 
 export interface ScanOptions {
   catalog: readonly CatalogEntry[];
@@ -27,7 +26,8 @@ export interface ScanOptions {
   rotations?: readonly (0 | 90 | 180 | 270)[];
   /** Numero massimo di ritagli riletti per foto. */
   maxCrops?: number;
-  onProgress?: (stage: ScanStage, done: number, total: number) => void;
+  /** Avanzamento: frazione complessiva e, dopo la prima lettura, le carte trovate. */
+  onProgress?: (progress: ScanProgress) => void;
 }
 
 export interface ScanResult {
@@ -50,8 +50,10 @@ export async function scanPhoto(
   const work = await photo.work(maxSide);
   const size = { width: work.width, height: work.height };
 
-  options.onProgress?.('read', 0, 1);
-  const lines: TextLine[] = await readPhoto(engine, work, options.rotations);
+  options.onProgress?.(readProgress(0));
+  const lines: TextLine[] = await readPhoto(engine, work, options.rotations, (f) =>
+    options.onProgress?.(readProgress(f)),
+  );
   let cards = detectCards(lines, catalog, detect);
 
   let refinedCards = 0;
@@ -59,8 +61,9 @@ export async function scanPhoto(
     const pending = cards.filter((c) => c.status === 'choose').slice(0, maxCrops);
     const scale = photo.width / work.width;
     const extra: TextLine[] = [];
+    if (pending.length > 0) options.onProgress?.(zoomProgress(0, pending.length, cards.length));
     for (const [i, card] of pending.entries()) {
-      options.onProgress?.('zoom', i, pending.length);
+      options.onProgress?.(zoomProgress(i, pending.length, cards.length));
       const crop = zoomCrop(card.titleBox, card.rotation, size);
       // Dalla foto a piena risoluzione, ingrandita di `zoomFactor` rispetto all'immagine di lavoro.
       if (crop.width < 1 || crop.height < 1) continue;
@@ -99,6 +102,6 @@ export async function scanPhoto(
     }
   }
 
-  options.onProgress?.('done', 1, 1);
+  options.onProgress?.(doneProgress(cards.length));
   return { cards, lines, size, refinedCards };
 }

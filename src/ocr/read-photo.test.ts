@@ -76,4 +76,32 @@ describe('readPhoto', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]?.rotation).toBe(90);
   });
+
+  it("passa all'esterno l'avanzamento del motore con il rilevamento unico", async () => {
+    const engine: OcrEngine = {
+      id: 'fake',
+      load: () => Promise.resolve(),
+      dispose: () => undefined,
+      recognize: () => Promise.resolve([]),
+      recognizeAllOrientations: (_image, onProgress) => {
+        onProgress?.(0.5);
+        return Promise.resolve([]);
+      },
+    };
+    const seen: number[] = [];
+    await readPhoto(engine, blank(10, 10), undefined, (f) => seen.push(f));
+    expect(seen).toEqual([0.5]);
+  });
+
+  it('con le rotazioni una alla volta dice a che punto è', async () => {
+    const engine: OcrEngine = {
+      id: 'fake',
+      load: () => Promise.resolve(),
+      dispose: () => undefined,
+      recognize: () => Promise.resolve([]),
+    };
+    const seen: number[] = [];
+    await readPhoto(engine, blank(10, 10), [0, 90], (f) => seen.push(f));
+    expect(seen).toEqual([0, 0.5]);
+  });
 });

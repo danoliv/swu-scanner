@@ -7,6 +7,7 @@ import type { Finish } from '../lib/pricing.ts';
 import type { PriceRow } from '../lib/prices.ts';
 import type { CsvListRow } from '../lib/list-csv.ts';
 import { normalize } from '../lib/text-match.ts';
+import { CARD_LANGUAGES, isCardLanguage, type CardLanguage } from '../lib/languages.ts';
 import type { SharedEntry } from '../lib/share.ts';
 import { buildVersions, type Version } from '../lib/versions.ts';
 
@@ -84,6 +85,87 @@ export function searchCards(entries: readonly CatalogEntry[], query: string, lim
     .map(([key]) => key);
 }
 
+/** Titolo e sottotitolo di ogni Carta nelle lingue in cui esiste. */
+export interface LanguageIndex {
+  /** Le lingue in cui la Carta ha un titolo, nell'ordine en, fr, de, es, it. */
+  languagesOf(cardKey: string): CardLanguage[];
+  titleIn(cardKey: string, language: CardLanguage): LocalTitle | null;
+}
+
+export function createLanguageIndex(entries: readonly CatalogEntry[]): LanguageIndex {
+  // Il sito ufficiale a volte ripete il testo inglese in un'altra lingua (carta non ancora tradotta):
+  // per ogni lingua vale la voce più specifica, cioè quella con meno lingue.
+  const byCard = new Map<
+    string,
+    Partial<Record<CardLanguage, { title: LocalTitle; width: number }>>
+  >();
+  for (const e of entries) {
+    const ref = e.ref ?? e;
+    const key = cardKey(ref.name, ref.subtitle);
+    const titles = byCard.get(key) ?? {};
+    const width = e.languages?.length ?? 0;
+    for (const l of e.languages ?? []) {
+      const prev = titles[l];
+      if (!prev || width < prev.width) {
+        titles[l] = { title: { name: e.name, subtitle: e.subtitle }, width };
+      }
+    }
+    byCard.set(key, titles);
+  }
+  return {
+    languagesOf: (key) => CARD_LANGUAGES.filter((l) => byCard.get(key)?.[l] !== undefined),
+    titleIn: (key, language) => byCard.get(key)?.[language]?.title ?? null,
+  };
+}
+
+/**
+ * Il titolo locale di una voce nella lingua data: il titolo se differisce da quello inglese della
+ * Carta, `null` se è lo stesso (si torna a quello inglese), `undefined` se non lo sappiamo.
+ */
+export function localPatch(
+  index: LanguageIndex,
+  key: string,
+  language: CardLanguage,
+): LocalTitle | null | undefined {
+  const title = index.titleIn(key, language);
+  if (!title) return undefined;
+  return cardKey(title.name, title.subtitle) === key ? null : title;
+}
+
+/** Come `localPatch`, ma per chi vuole solo il titolo da mostrare (niente se è quello inglese). */
+export function localTitleFor(
+  index: LanguageIndex,
+  catalog: Catalog,
+  key: string,
+  language: CardLanguage,
+): LocalTitle | undefined {
+  if (!catalog.card(key)) return undefined;
+  return localPatch(index, key, language) ?? undefined;
+}
+
+/** La lingua di una carta da rivedere, con il titolo nella lingua scelta. */
+export function setItemLanguage(
+  item: ReviewItem,
+  language: CardLanguage | null,
+  index: LanguageIndex,
+): ReviewItem {
+  if (item.cardKey === null || language === null) return { ...item, language };
+  const patch = localPatch(index, item.cardKey, language);
+  const locals = { ...item.locals };
+  if (patch) locals[item.cardKey] = patch;
+  else if (patch === null) delete locals[item.cardKey];
+  return { ...item, language, locals };
+}
+
+/**
+ * La lingua più probabile tra quelle possibili: se è una sola, quella; se il titolo vale in più
+ * lingue (succede spesso: "Darth Vader" è uguale in inglese, tedesco, spagnolo e italiano) l'inglese.
+ */
+export function guessLanguage(languages: readonly CardLanguage[]): CardLanguage | null {
+  if (languages.length === 0) return null;
+  return languages.includes('en') ? 'en' : (languages[0] ?? null);
+}
+
 export interface ReviewItem {
   id: string;
   /** recognized = Carta identificata; choose = da scegliere tra le candidate. */
@@ -94,6 +176,10 @@ export interface ReviewItem {
   finish: Finish | null;
   /** Titolo nella lingua letta, per ogni candidata il cui titolo non è quello inglese. */
   locals: Record<string, LocalTitle>;
+  /** Le lingue possibili di ogni candidata, secondo ciò che si è letto. */
+  languages: Record<string, CardLanguage[]>;
+  /** La lingua della carta; null se non si sa. */
+  language: CardLanguage | null;
 }
 
 /** Una riga di "Da rivedere" da una carta rilevata; null se nessuna candidata è nel Catalogo. */
@@ -104,22 +190,27 @@ export function reviewFromDetected(
 ): ReviewItem | null {
   const candidates: string[] = [];
   const locals: Record<string, LocalTitle> = {};
+  const languages: Record<string, CardLanguage[]> = {};
   for (const c of d.candidates) {
     const english = c.ref ?? c;
     const key = cardKey(english.name, english.subtitle);
     if (catalog.card(key) === undefined || candidates.includes(key)) continue;
     candidates.push(key);
+    languages[key] = c.languages ?? [];
     if (cardKey(c.name, c.subtitle) !== key) locals[key] = { name: c.name, subtitle: c.subtitle };
   }
   if (candidates.length === 0) return null;
+  const chosen = d.status === 'recognized' ? (candidates[0] ?? null) : null;
   return {
     id: newId(),
     status: d.status,
-    cardKey: d.status === 'recognized' ? (candidates[0] ?? null) : null,
+    cardKey: chosen,
     candidates,
     idProduct: null,
     finish: null,
     locals,
+    languages,
+    language: chosen ? guessLanguage(languages[chosen] ?? []) : null,
   };
 }
 
@@ -136,6 +227,7 @@ export function resolveItem(
   if (changesCard) {
     next.idProduct = null;
     next.finish = null;
+    next.language = guessLanguage(item.languages[patch.cardKey as string] ?? []);
   }
   if (patch.idProduct !== undefined) next.idProduct = patch.idProduct;
   if (patch.finish !== undefined) next.finish = patch.finish;
@@ -157,6 +249,7 @@ export function toNewEntries(items: readonly ReviewItem[]): {
         cardKey: it.cardKey,
         idProduct: it.idProduct,
         finish: it.finish,
+        ...(it.language ? { language: it.language } : {}),
         ...(local ? { local } : {}),
       });
     }
@@ -184,6 +277,7 @@ export function listToCsvRows(list: readonly ListEntry[], catalog: Catalog): Csv
       finish: version?.finish ?? e.finish ?? '',
       idProduct: e.idProduct,
       priceEur: price.status === 'chosen' ? (price.cents / 100).toFixed(2) : '',
+      language: e.language ?? '',
     };
   });
 }
@@ -211,6 +305,7 @@ export function entriesFromCsv(
       idProduct: keepProduct ? r.idProduct : null,
       finish: keepProduct && (r.finish === 'normal' || r.finish === 'foil') ? r.finish : null,
       quantity: r.quantity,
+      ...(isCardLanguage(r.language) ? { language: r.language } : {}),
     });
   }
   return { entries, unknown };
@@ -252,6 +347,7 @@ export function unresolvedRange(
 export function entriesFromShared(
   shared: readonly SharedEntry[],
   catalog: Catalog,
+  languages?: LanguageIndex,
 ): { entries: (NewEntry & { quantity: number })[]; unknown: number } {
   const entries: (NewEntry & { quantity: number })[] = [];
   let unknown = 0;
@@ -264,11 +360,15 @@ export function entriesFromShared(
       continue;
     }
     const keepProduct = s.idProduct !== null && byProduct === key;
+    const local =
+      s.language && languages ? localTitleFor(languages, catalog, key, s.language) : undefined;
     entries.push({
       cardKey: key,
       idProduct: keepProduct ? s.idProduct : null,
       finish: keepProduct ? s.finish : null,
       quantity: s.quantity,
+      ...(s.language ? { language: s.language } : {}),
+      ...(local ? { local } : {}),
       ...(keepProduct && s.price ? { shared: s.price } : {}),
     });
   }

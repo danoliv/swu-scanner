@@ -21,6 +21,9 @@ export interface OcrEngine {
    * Legge le righe in qualsiasi orientamento con un solo rilevamento (più veloce delle 4 rotazioni
    * complete di `readPhoto`). Le coordinate sono quelle dell'immagine, `rotation` dice il verso di lettura.
    */
-  recognizeAllOrientations?(image: RawImage): Promise<TextLine[]>;
+  recognizeAllOrientations?(
+    image: RawImage,
+    onProgress?: (fraction: number) => void,
+  ): Promise<TextLine[]>;
   dispose(): void;
 }

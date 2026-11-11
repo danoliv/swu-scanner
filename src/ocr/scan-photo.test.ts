@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CatalogEntry } from '../lib/detect-cards.ts';
 import type { OcrEngine, TextLine } from './engine.ts';
 import type { RawImage } from './image.ts';
+import type { ScanProgress } from './progress.ts';
 import { scanPhoto } from './scan-photo.ts';
 
 const catalog: CatalogEntry[] = [
@@ -107,12 +108,26 @@ describe('scanPhoto', () => {
     expect(engine.sizes).toHaveLength(4);
   });
 
-  it("segnala l'avanzamento", async () => {
+  it("segnala l'avanzamento: cresce sempre, dice le carte trovate e finisce a 1", async () => {
     const engine = fakeEngine([[line('Darth Vader', 100, 50, 200, 20)]]);
-    const seen: string[] = [];
-    await scanPhoto(engine, blank(400, 300), { catalog, onProgress: (stage) => seen.push(stage) });
-    expect(seen).toContain('read');
-    expect(seen).toContain('zoom');
-    expect(seen.at(-1)).toBe('done');
+    const seen: ScanProgress[] = [];
+    await scanPhoto(engine, blank(400, 300), { catalog, onProgress: (p) => seen.push(p) });
+    expect(seen[0]).toMatchObject({ stage: 'read', fraction: 0, cards: null });
+    expect(seen.at(-1)).toMatchObject({ stage: 'done', fraction: 1 });
+    expect(seen.at(-1)?.cards).toBeGreaterThanOrEqual(0);
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i]?.fraction).toBeGreaterThanOrEqual(seen[i - 1]?.fraction ?? 0);
+    }
+  });
+
+  it('nella rilettura ingrandita dice quante carte ha già trovato e a che punto è', async () => {
+    const lines = [line('Darth Vader', 20, 20, 150, 20), line('Darth Vader', 220, 20, 150, 20)];
+    const engine = fakeEngine([lines, [], [], [], [], []]);
+    const seen: ScanProgress[] = [];
+    await scanPhoto(engine, blank(400, 300), { catalog, onProgress: (p) => seen.push(p) });
+    const zoom = seen.filter((p) => p.stage === 'zoom');
+    expect(zoom.length).toBeGreaterThan(0);
+    expect(zoom.every((p) => p.cards === 2 && p.total === 2)).toBe(true);
+    expect(zoom.at(-1)?.done).toBe(1);
   });
 });

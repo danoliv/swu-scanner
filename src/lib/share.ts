@@ -1,6 +1,7 @@
 // Condivisione della Lista come link (SPEC §6): le voci con i prezzi di chi condivide, in JSON
 // compatto, compresso (deflate) e scritto in base64url nel frammento dell'indirizzo (`#list=...`).
 // Codifica e decodifica sono pure: non toccano né il DOM né la Lista.
+import { CARD_LANGUAGES, type CardLanguage } from './languages.ts';
 import type { EntryPrice, ListEntry, SharedPrice } from './list.ts';
 import type { Finish } from './pricing.ts';
 
@@ -11,6 +12,7 @@ export interface SharedEntry {
   finish: Finish | null;
   /** Chiave della Carta; presente solo se manca il prodotto. */
   cardKey: string | null;
+  language: CardLanguage | null;
   price: SharedPrice | null;
 }
 
@@ -18,8 +20,12 @@ const MAX_ENTRIES = 2000;
 const MAX_CENTS = 10_000_000;
 const MAX_KEY = 300;
 
-/** Compatto: [quantità, prodotto, finitura (0 normale, 1 foil), centesimi, 1 se "da", indice data, chiave?]. */
-type Row = [number, number | null, 0 | 1 | null, number | null, 0 | 1, number, string?];
+/**
+ * Compatto: [quantità, prodotto, finitura (0 normale, 1 foil), centesimi, 1 se "da", indice data,
+ * chiave della Carta (solo senza prodotto, altrimenti ''), lingua (indice in en, fr, de, es, it)].
+ * Gli ultimi due si omettono se non servono.
+ */
+type Row = [number, number | null, 0 | 1 | null, number | null, 0 | 1, number, string?, number?];
 interface Payload {
   v: 1;
   d: string[];
@@ -50,6 +56,8 @@ export function toShared(
       p.status === 'chosen' && p.kind === 'low' ? 1 : 0,
       dateIndex(e.shared?.date ?? ownDate),
     ];
+    const lang = e.language === undefined ? -1 : CARD_LANGUAGES.indexOf(e.language);
+    if (lang >= 0) return [...base, e.idProduct === null ? e.cardKey : '', lang];
     return e.idProduct === null ? [...base, e.cardKey] : base;
   });
   return { v: 1, d: dates, i: rows };
@@ -67,12 +75,14 @@ export function fromShared(input: unknown): SharedEntry[] | null {
   const out: SharedEntry[] = [];
   for (const row of i as unknown[]) {
     if (!Array.isArray(row)) continue;
-    const [quantity, idProduct, finish, cents, low, dateIdx, key] = row as unknown[];
+    const [quantity, idProduct, finish, cents, low, dateIdx, rawKey, lang] = row as unknown[];
+    const key = rawKey === '' ? undefined : rawKey;
     if (!isInt(quantity, 1, 999)) continue;
     if (idProduct !== null && !isInt(idProduct, 1, 1e9)) continue;
     if (finish !== null && finish !== 0 && finish !== 1) continue;
     if (key !== undefined && (typeof key !== 'string' || key.length > MAX_KEY)) continue;
     if (idProduct === null && typeof key !== 'string') continue;
+    if (lang !== undefined && !isInt(lang, 0, CARD_LANGUAGES.length - 1)) continue;
     const date = isInt(dateIdx, 0, 1e6) ? dates[dateIdx] : null;
     const price: SharedPrice | null =
       cents !== null && isInt(cents, 0, MAX_CENTS) && date
@@ -83,6 +93,7 @@ export function fromShared(input: unknown): SharedEntry[] | null {
       idProduct,
       finish: finish === null ? null : finish === 1 ? 'foil' : 'normal',
       cardKey: typeof key === 'string' ? key : null,
+      language: typeof lang === 'number' ? (CARD_LANGUAGES[lang] ?? null) : null,
       price,
     });
   }

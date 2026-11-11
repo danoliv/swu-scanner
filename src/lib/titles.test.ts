@@ -46,3 +46,25 @@ describe('compactTitles / expandTitles', () => {
     expect(expandTitles([['A', null, 99]], cards)).toEqual([]);
   });
 });
+
+describe('lingue nei titoli compatti', () => {
+  const withLanguages: CatalogEntry[] = [
+    {
+      name: 'Darth Vader',
+      subtitle: 'Dark Lord of the Sith',
+      ref: cards[0]!,
+      languages: ['en', 'de'],
+    },
+    { name: 'Dark Vador', subtitle: 'Seigneur noir des Sith', ref: cards[0]!, languages: ['fr'] },
+    { name: 'Battlefield Marine', subtitle: null, ref: cards[1]! },
+  ];
+  it('scrive le lingue come bit e le rilegge', () => {
+    const compact = compactTitles(withLanguages, cards);
+    expect(compact).toEqual([
+      ['Darth Vader', 'Dark Lord of the Sith', 0, 5],
+      ['Dark Vador', 'Seigneur noir des Sith', 0, 2],
+      ['Battlefield Marine', null, 1],
+    ]);
+    expect(expandTitles(compact, cards)).toEqual(withLanguages);
+  });
+});

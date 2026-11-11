@@ -154,3 +154,23 @@ test.describe('installazione', () => {
     await expect(page.getByTestId('install')).toHaveCount(0);
   });
 });
+
+test.describe('nome dell’app', () => {
+  test('si vede in cima a ogni scheda, con la scansione in corso e al primo avvio', async ({
+    page,
+  }) => {
+    await page.goto('/'); // senza motore finto: c'è la pagina del primo avvio
+    await expect(page.getByTestId('app-name')).toHaveText('SWU Scanner');
+    await page.goto('/');
+    await mockScanner(page);
+    await page.reload();
+    for (const tab of ['tab-scan', 'tab-list', 'tab-settings']) {
+      await page.getByTestId(tab).click();
+      await expect(page.getByTestId('app-name')).toBeVisible();
+      await expect(page.getByTestId('app-name')).toContainText('SWU Scanner');
+    }
+    await page.getByTestId('tab-scan').click();
+    await page.getByTestId('photo-gallery').setInputFiles(FAKE_PHOTO);
+    await expect(page.getByTestId('app-name')).toBeVisible(); // anche con le carte da rivedere
+  });
+});

@@ -1,6 +1,7 @@
 // Titoli di ogni Carta in tutte le lingue (SPEC §9): il sito ufficiale dà titolo e sottotitolo per
 // lingua con lo stesso `cardUid`; la versione inglese lo collega alla Carta del Catalogo.
 import type { CatalogEntry } from './detect-cards.ts';
+import { CARD_LANGUAGES, isCardLanguage } from './languages.ts';
 import { normalize } from './text-match.ts';
 
 export interface OfficialRecord {
@@ -54,15 +55,24 @@ export function buildLocalizedEntries(
     else unmatched.add(r.subtitle ? `${r.title}, ${r.subtitle}` : r.title);
   }
 
-  const seen = new Set<string>();
+  const seen = new Map<string, CatalogEntry>();
   const entries: CatalogEntry[] = [];
   for (const r of records) {
     const ref = refByUid.get(r.uid);
     if (!ref) continue;
     const id = `${key(r.title, r.subtitle)}>${key(ref.name, ref.subtitle)}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    entries.push({ name: r.title, subtitle: r.subtitle, ref });
+    let entry = seen.get(id);
+    if (!entry) {
+      entry = { name: r.title, subtitle: r.subtitle, ref };
+      seen.set(id, entry);
+      entries.push(entry);
+    }
+    // Lo stesso titolo in più lingue è una voce sola, con tutte le lingue in cui vale.
+    if (isCardLanguage(r.locale) && !(entry.languages ?? []).includes(r.locale)) {
+      entry.languages = CARD_LANGUAGES.filter(
+        (l) => l === r.locale || (entry?.languages ?? []).includes(l),
+      );
+    }
   }
   return { entries, unmatched: [...unmatched] };
 }

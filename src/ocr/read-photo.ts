@@ -9,12 +9,14 @@ export async function readPhoto(
   engine: OcrEngine,
   image: RawImage,
   rotations: readonly (0 | 90 | 180 | 270)[] = [0, 90, 180, 270],
+  onProgress?: (fraction: number) => void,
 ): Promise<TextLine[]> {
   if (engine.recognizeAllOrientations && rotations.length === 4) {
-    return engine.recognizeAllOrientations(image);
+    return engine.recognizeAllOrientations(image, onProgress);
   }
   const all: TextLine[] = [];
-  for (const rotation of rotations) {
+  for (const [i, rotation] of rotations.entries()) {
+    onProgress?.(i / rotations.length);
     const lines = await engine.recognize(rotateImage(image, rotation));
     for (const l of lines) {
       all.push({ ...l, box: unrotateBox(l.box, rotation, image.width, image.height), rotation });

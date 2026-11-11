@@ -189,3 +189,43 @@ describe('Lista condivisa', () => {
     expect(out.map((e) => e.id)).toEqual(['a', 'b']);
   });
 });
+
+describe('lingua della voce', () => {
+  const mk = (over: Partial<ListEntry>): ListEntry => ({ id: 'a', ...base, quantity: 1, ...over });
+
+  it('la stessa carta in due lingue sono due voci; nella stessa lingua si sommano', () => {
+    let list = addEntry([], { ...base, language: 'fr' }, newId);
+    list = addEntry(list, { ...base, language: 'en' }, newId);
+    list = addEntry(list, { ...base, language: 'fr' }, newId);
+    expect(list.map((e) => [e.language, e.quantity])).toEqual([
+      ['fr', 2],
+      ['en', 1],
+    ]);
+  });
+  it('senza lingua e con lingua non si confondono', () => {
+    const list = addEntry([mk({})], { ...base, language: 'de' }, newId);
+    expect(list).toHaveLength(2);
+  });
+  it('updateEntry cambia lingua e titolo, e non tocca il prezzo ricevuto', () => {
+    const shared = { cents: 500, kind: 'trend' as const, date: '2026-11-07' };
+    const out = updateEntry([mk({ shared })], 'a', {
+      language: 'fr',
+      local: { name: 'Dark Vador', subtitle: null },
+    });
+    expect(out[0]).toMatchObject({ language: 'fr', local: { name: 'Dark Vador' }, shared });
+  });
+  it('updateEntry con null toglie lingua e titolo locale', () => {
+    const out = updateEntry([mk({ language: 'fr', local: { name: 'x', subtitle: null } })], 'a', {
+      language: null,
+      local: null,
+    });
+    expect(out[0]?.language).toBeUndefined();
+    expect(out[0]?.local).toBeUndefined();
+  });
+  it('cambiando lingua si unisce a una voce uguale già presente', () => {
+    const list = [mk({ id: 'a', language: 'fr', quantity: 2 }), mk({ id: 'b', language: 'en' })];
+    const out = updateEntry(list, 'a', { language: 'en' });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ id: 'b', quantity: 3 });
+  });
+});

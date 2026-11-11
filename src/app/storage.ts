@@ -1,5 +1,6 @@
 // Lista e impostazioni sul telefono (localStorage). Ogni lettura e scrittura è protetta: l'archivio può
 // mancare, essere pieno o bloccato (finestra privata, dati del sito cancellati) e il sito deve funzionare.
+import { isCardLanguage } from '../lib/languages.ts';
 import type { ListEntry } from '../lib/list.ts';
 import { LOCALES, type Locale } from './i18n.ts';
 
@@ -70,6 +71,7 @@ export function loadList(store: KV | null): ListEntry[] {
     const clean: ListEntry = { ...e };
     if (clean.local !== undefined && !validLocal(clean.local)) delete clean.local;
     if (clean.shared !== undefined && !validShared(clean.shared)) delete clean.shared;
+    if (clean.language !== undefined && !isCardLanguage(clean.language)) delete clean.language;
     return clean;
   });
 }

@@ -3,10 +3,16 @@ import type { LinkedCard } from '../lib/attach-links.ts';
 import type { DetectedCard } from '../lib/detect-cards.ts';
 import type { ListEntry } from '../lib/list.ts';
 import type { PriceRow } from '../lib/prices.ts';
+import type { CardLanguage } from '../lib/languages.ts';
 import type { SharedEntry } from '../lib/share.ts';
 import {
   cardKey,
   createCatalog,
+  createLanguageIndex,
+  guessLanguage,
+  localPatch,
+  localTitleFor,
+  setItemLanguage,
   entriesFromCsv,
   entriesFromShared,
   listToCsvRows,
@@ -275,11 +281,20 @@ describe('resolveItem e toNewEntries', () => {
     idProduct: null,
     finish: null,
     locals: { [marineKey]: { name: 'Marine', subtitle: null } },
+    languages: {
+      [vaderKey]: ['en', 'fr'] as CardLanguage[],
+      [marineKey]: ['fr'] as CardLanguage[],
+    },
+    language: null as CardLanguage | null,
   };
   it('scegliere una candidata fissa la Carta e azzera la versione', () => {
     const item = resolveItem({ ...choose, idProduct: 5 }, { cardKey: marineKey });
     expect(item.cardKey).toBe(marineKey);
     expect(item.idProduct).toBeNull();
+    expect(item.language).toBe('fr'); // l'unica lingua possibile di quella candidata
+  });
+  it('con più lingue possibili si propone l’inglese', () => {
+    expect(resolveItem(choose, { cardKey: vaderKey }).language).toBe('en');
   });
   it('scegliere versione e finitura le aggiorna', () => {
     const item = resolveItem({ ...choose, cardKey: vaderKey }, { idProduct: 3, finish: 'foil' });
@@ -311,6 +326,10 @@ describe('resolveItem e toNewEntries', () => {
       local: { name: 'Marine', subtitle: null },
     });
   });
+  it('alla conferma porta la lingua nella voce', () => {
+    const item = { ...choose, cardKey: marineKey, language: 'fr' as const };
+    expect(toNewEntries([item]).entries[0]).toMatchObject({ language: 'fr' });
+  });
 });
 
 describe('CSV della Lista', () => {
@@ -335,6 +354,7 @@ describe('CSV della Lista', () => {
       finish: 'normal',
       idProduct: 2,
       priceEur: '50.00',
+      language: '',
     });
   });
 
@@ -347,6 +367,7 @@ describe('CSV della Lista', () => {
       finish: '',
       idProduct: null,
       priceEur: '',
+      language: '',
     });
   });
 
@@ -372,6 +393,7 @@ describe('CSV della Lista', () => {
         finish: 'normal',
         idProduct: 1,
         priceEur: '',
+        language: '',
       },
       {
         quantity: 1,
@@ -383,6 +405,7 @@ describe('CSV della Lista', () => {
         finish: '',
         idProduct: null,
         priceEur: '',
+        language: '',
       },
       {
         quantity: 1,
@@ -394,6 +417,7 @@ describe('CSV della Lista', () => {
         finish: '',
         idProduct: null,
         priceEur: '',
+        language: '',
       },
     ];
     const { entries, unknown } = entriesFromCsv(rows, catalog);
@@ -418,6 +442,7 @@ describe('CSV della Lista', () => {
           finish: '',
           idProduct: null,
           priceEur: '',
+          language: '',
         },
       ],
       catalog,
@@ -439,6 +464,7 @@ describe('CSV della Lista', () => {
           finish: '',
           idProduct: 9,
           priceEur: '',
+          language: '',
         },
       ],
       catalog,
@@ -510,6 +536,7 @@ describe('entriesFromShared', () => {
     idProduct: 1,
     finish: 'normal',
     cardKey: null,
+    language: null,
     price,
     ...over,
   });
@@ -545,5 +572,131 @@ describe('entriesFromShared', () => {
   it('un prodotto sconosciuto con la chiave giusta torna una voce da scegliere, senza prezzo', () => {
     const { entries } = entriesFromShared([sh({ idProduct: 424242, cardKey: vaderKey })], catalog);
     expect(entries).toEqual([{ cardKey: vaderKey, idProduct: null, finish: null, quantity: 1 }]);
+  });
+});
+
+describe('lingue delle Carte', () => {
+  const entries = [
+    {
+      name: 'Darth Vader',
+      subtitle: 'Dark Lord of the Sith',
+      ref: vader,
+      languages: ['en'] as CardLanguage[],
+    },
+    {
+      name: 'Dark Vador',
+      subtitle: 'Seigneur noir des Sith',
+      ref: vader,
+      languages: ['fr'] as CardLanguage[],
+    },
+    {
+      name: 'Darth Vader',
+      subtitle: 'Dunkler Lord der Sith',
+      ref: vader,
+      languages: ['de'] as CardLanguage[],
+    },
+    {
+      name: 'Battlefield Marine',
+      subtitle: null,
+      ref: marine,
+      languages: ['en', 'de', 'it'] as CardLanguage[],
+    },
+  ];
+  const index = createLanguageIndex(entries);
+
+  it('elenca le lingue in cui la Carta esiste, nell’ordine fisso', () => {
+    expect(index.languagesOf(vaderKey)).toEqual(['en', 'fr', 'de']);
+    expect(index.languagesOf(marineKey)).toEqual(['en', 'de', 'it']);
+    expect(index.languagesOf('non|esiste')).toEqual([]);
+  });
+  it('se il testo inglese è ripetuto in un’altra lingua vale la voce più specifica', () => {
+    const idx = createLanguageIndex([
+      {
+        name: 'Darth Vader',
+        subtitle: 'Dark Lord of the Sith',
+        ref: vader,
+        languages: ['en', 'fr'],
+      },
+      { name: 'Dark Vador', subtitle: 'Seigneur noir des Sith', ref: vader, languages: ['fr'] },
+    ]);
+    expect(idx.titleIn(vaderKey, 'fr')?.name).toBe('Dark Vador');
+    expect(idx.titleIn(vaderKey, 'en')?.name).toBe('Darth Vader');
+  });
+  it('dà il titolo nella lingua scelta', () => {
+    expect(index.titleIn(vaderKey, 'fr')).toEqual({
+      name: 'Dark Vador',
+      subtitle: 'Seigneur noir des Sith',
+    });
+    expect(index.titleIn(vaderKey, 'es')).toBeNull();
+  });
+  it('il titolo locale manca per l’inglese e per le lingue senza titolo', () => {
+    expect(localTitleFor(index, catalog, vaderKey, 'en')).toBeUndefined();
+    expect(localTitleFor(index, catalog, vaderKey, 'es')).toBeUndefined();
+    expect(localTitleFor(index, catalog, vaderKey, 'de')).toEqual({
+      name: 'Darth Vader',
+      subtitle: 'Dunkler Lord der Sith',
+    });
+    // stesso titolo e nessun sottotitolo: uguale all'inglese, niente da mostrare in più
+    expect(localTitleFor(index, catalog, marineKey, 'it')).toBeUndefined();
+  });
+  it('guessLanguage: una sola lingua, altrimenti l’inglese se c’è', () => {
+    expect(guessLanguage([])).toBeNull();
+    expect(guessLanguage(['fr'])).toBe('fr');
+    expect(guessLanguage(['de', 'en', 'it'])).toBe('en');
+    expect(guessLanguage(['de', 'it'])).toBe('de');
+  });
+  it('reviewFromDetected tiene le lingue possibili e propone quella giusta', () => {
+    const d: DetectedCard = {
+      status: 'recognized',
+      candidates: [
+        { name: 'Dark Vador', subtitle: 'Seigneur noir des Sith', ref: vader, languages: ['fr'] },
+      ],
+      titleBox: { x: 0, y: 0, width: 1, height: 1 },
+      rotation: 0,
+    };
+    const item = reviewFromDetected(d, catalog, () => 'r1');
+    expect(item?.language).toBe('fr');
+    expect(item?.languages[vaderKey]).toEqual(['fr']);
+  });
+
+  it('localPatch: il titolo se diverso, null se uguale all’inglese, undefined se manca', () => {
+    expect(localPatch(index, vaderKey, 'fr')).toEqual({
+      name: 'Dark Vador',
+      subtitle: 'Seigneur noir des Sith',
+    });
+    expect(localPatch(index, vaderKey, 'en')).toBeNull();
+    expect(localPatch(index, vaderKey, 'es')).toBeUndefined();
+  });
+
+  describe('setItemLanguage', () => {
+    const item = {
+      id: 'r',
+      status: 'recognized' as const,
+      cardKey: vaderKey,
+      candidates: [vaderKey],
+      idProduct: null,
+      finish: null,
+      locals: { [vaderKey]: { name: 'Darth Vader', subtitle: 'Dunkler Lord der Sith' } },
+      languages: { [vaderKey]: ['en', 'de'] as CardLanguage[] },
+      language: 'de' as CardLanguage | null,
+    };
+    it('cambia lingua e titolo mostrato', () => {
+      const fr = setItemLanguage(item, 'fr', index);
+      expect(fr.language).toBe('fr');
+      expect(fr.locals[vaderKey]?.name).toBe('Dark Vador');
+    });
+    it('in inglese toglie il titolo locale', () => {
+      expect(setItemLanguage(item, 'en', index).locals[vaderKey]).toBeUndefined();
+    });
+    it('una lingua senza titolo lascia quello che c’è', () => {
+      const es = setItemLanguage(item, 'es', index);
+      expect(es.language).toBe('es');
+      expect(es.locals[vaderKey]).toEqual(item.locals[vaderKey]);
+    });
+    it('"non indicata" e carta ancora da scegliere cambiano solo la lingua', () => {
+      expect(setItemLanguage(item, null, index)).toEqual({ ...item, language: null });
+      const pending = { ...item, cardKey: null };
+      expect(setItemLanguage(pending, 'fr', index).locals).toEqual(item.locals);
+    });
   });
 });

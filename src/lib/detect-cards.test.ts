@@ -257,3 +257,42 @@ describe('detectCards con carte ruotate e righe di regole', () => {
     expect(c?.candidates).toHaveLength(2);
   });
 });
+
+describe('lingue delle candidate', () => {
+  const vader = { name: 'Darth Vader', subtitle: 'Dark Lord of the Sith' };
+  const marine = { name: 'Battlefield Marine', subtitle: null };
+  const multilingual: CatalogEntry[] = [
+    { ...vader, ref: vader, languages: ['en'] },
+    { name: 'Darth Vader', subtitle: 'Dunkler Lord der Sith', ref: vader, languages: ['de'] },
+    { name: 'Dark Vador', subtitle: 'Seigneur noir des Sith', ref: vader, languages: ['fr'] },
+    { ...marine, ref: marine, languages: ['en', 'de', 'it'] },
+    { name: 'Marine du champ de bataille', subtitle: null, ref: marine, languages: ['fr'] },
+  ];
+
+  it('un titolo che vale in più lingue le porta tutte', () => {
+    const [c] = detectCards([line('Battlefield Marine', 100, 50)], multilingual);
+    expect(c?.candidates[0]?.languages).toEqual(['en', 'de', 'it']);
+  });
+
+  it('un titolo di una sola lingua la dà con certezza', () => {
+    const [c] = detectCards([line('Marine du champ de bataille', 100, 50)], multilingual);
+    expect(c?.status).toBe('recognized');
+    expect(c?.candidates[0]?.languages).toEqual(['fr']);
+  });
+
+  it('il sottotitolo letto sotto il titolo decide la lingua', () => {
+    const [c] = detectCards(
+      [line('Darth Vader', 100, 50), line('Dunkler Lord der Sith', 100, 80)],
+      multilingual,
+    );
+    expect(c?.status).toBe('recognized');
+    expect(c?.candidates[0]?.languages).toEqual(['de']);
+    expect(c?.candidates[0]?.subtitle).toBe('Dunkler Lord der Sith');
+  });
+
+  it('senza sottotitolo leggibile restano le lingue del titolo', () => {
+    const [c] = detectCards([line('Darth Vader', 100, 50)], multilingual);
+    expect(c?.status).toBe('recognized'); // una sola Carta con questo titolo
+    expect(c?.candidates[0]?.languages).toEqual(['en', 'de']);
+  });
+});

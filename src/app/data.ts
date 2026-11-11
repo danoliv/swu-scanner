@@ -3,7 +3,7 @@ import type { LinkedCard } from '../lib/attach-links.ts';
 import type { CatalogEntry } from '../lib/detect-cards.ts';
 import type { Prices } from '../lib/prices.ts';
 import { expandTitles, type CompactTitle } from '../lib/titles.ts';
-import { createCatalog, type Catalog } from './model.ts';
+import { createCatalog, createLanguageIndex, type Catalog, type LanguageIndex } from './model.ts';
 
 export interface AppData {
   catalog: Catalog;
@@ -11,6 +11,8 @@ export interface AppData {
   compactTitles: CompactTitle[];
   cardNames: { name: string; subtitle: string | null }[];
   titles: CatalogEntry[];
+  /** Le lingue di ogni Carta e il suo titolo in ciascuna. */
+  languages: LanguageIndex;
   /** Data del price guide, come scritta da Cardmarket (ISO). */
   priceDate: string;
 }
@@ -27,11 +29,13 @@ export async function loadData(base: string): Promise<AppData> {
     getJson<Prices>(`${base}data/prices.json`),
     getJson<CompactTitle[]>(`${base}data/titles.json`),
   ]);
+  const expanded = expandTitles(titles, cards);
   return {
     compactTitles: titles,
     cardNames: cards.map((c) => ({ name: c.name, subtitle: c.subtitle })),
     catalog: createCatalog(cards, prices.p),
-    titles: expandTitles(titles, cards),
+    titles: expanded,
+    languages: createLanguageIndex(expanded),
     priceDate: prices.date,
   };
 }

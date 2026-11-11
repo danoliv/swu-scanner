@@ -17,20 +17,25 @@ import { parseListCsv, toCsv } from '../lib/list-csv.ts';
 import { decodeShare, encodeShare, shareCodeFromHash, shareUrl, toShared } from '../lib/share.ts';
 import { priceAgeDays, pricesAreStale } from '../lib/freshness.ts';
 import { thumbnailUrl } from '../lib/images.ts';
+import { LANGUAGE_NAMES, type CardLanguage } from '../lib/languages.ts';
 import { formatEuro, type Finish, type Quote } from '../lib/pricing.ts';
 import type { Version } from '../lib/versions.ts';
 import type { AppData } from './data.ts';
 import { h, put } from './dom.ts';
 import { createT, detectLocale, LOCALES, type Locale, type Translate } from './i18n.ts';
 import type { InstallHelper } from './install.ts';
+import { followProgress, START, type ScanProgress } from '../ocr/progress.ts';
 import type { MessageKey } from './messages.ts';
 import {
   entriesFromCsv,
   entriesFromShared,
   listToCsvRows,
+  localPatch,
+  localTitleFor,
   resolveItem,
   reviewFromDetected,
   searchCards,
+  setItemLanguage,
   toNewEntries,
   unresolvedRange,
   type ReviewItem,
@@ -47,7 +52,7 @@ import {
 
 /** Legge una foto e restituisce le carte rilevate. Il motore vero (OCR) lo fornisce il chiamante. */
 export interface Scanner {
-  scan(file: File, onProgress: (message: MessageKey) => void): Promise<DetectedCard[]>;
+  scan(file: File, onProgress: (progress: ScanProgress) => void): Promise<DetectedCard[]>;
 }
 
 /** Scaricamento, cache e caricamento nel motore dei modelli di lettura (SPEC §8). */
@@ -86,7 +91,8 @@ interface State {
   tab: Tab;
   list: ListEntry[];
   review: ReviewItem[];
-  scanning: MessageKey | null;
+  /** Una foto è in lettura: a che punto è. */
+  scanning: ScanProgress | null;
   scanError: boolean;
   open: string | null;
   searchOpen: boolean;
@@ -298,6 +304,44 @@ export function createApp(deps: AppDeps): {
     return `${where} · ${labelOf(v)}`;
   };
 
+  /** Sceglie la lingua della carta tra quelle in cui esiste; "Non indicata" se non si sa. */
+  function languagePicker(
+    key: string,
+    current: CardLanguage | null,
+    onPick: (language: CardLanguage | null) => void,
+  ): HTMLElement {
+    const available = data.languages.languagesOf(key);
+    const options = current && !available.includes(current) ? [...available, current] : available;
+    const id = `lang-${key.length}-${Math.abs([...key].reduce((a, c) => a * 31 + c.charCodeAt(0), 7))}`;
+    return h(
+      'label',
+      { class: 'language-picker', attrs: { for: id } },
+      h('span', { class: 'muted', text: t('card.language') }),
+      h(
+        'select',
+        {
+          attrs: { id, 'data-testid': 'language-select' },
+          on: {
+            change: (e) => {
+              const v = (e.target as HTMLSelectElement).value;
+              onPick(options.find((l) => l === v) ?? null);
+            },
+          },
+        },
+        h('option', {
+          attrs: { value: '', ...(current === null ? { selected: '' } : {}) },
+          text: t('card.languageUnknown'),
+        }),
+        ...options.map((l) =>
+          h('option', {
+            attrs: { value: l, ...(l === current ? { selected: '' } : {}) },
+            text: `${LANGUAGE_NAMES[l]} (${l.toUpperCase()})`,
+          }),
+        ),
+      ),
+    );
+  }
+
   function versionPicker(
     cardKey: string,
     selected: { idProduct: number | null; finish: Finish | null },
@@ -396,7 +440,7 @@ export function createApp(deps: AppDeps): {
   }
 
   /** Titolo nella lingua della carta (se nota), con sotto in piccolo quello inglese del Catalogo (SPEC §3). */
-  function cardTitle(key: string, local?: LocalTitle): HTMLElement {
+  function cardTitle(key: string, local?: LocalTitle, language?: CardLanguage | null): HTMLElement {
     const card = catalog.card(key);
     const name = local?.name ?? card?.name ?? key;
     const subtitle = local ? local.subtitle : (card?.subtitle ?? null);
@@ -404,7 +448,18 @@ export function createApp(deps: AppDeps): {
     return h(
       'div',
       { class: 'card-title' },
-      h('div', { class: 'name', text: name }),
+      h(
+        'div',
+        { class: 'name' },
+        name,
+        language
+          ? h('span', {
+              class: 'badge lang',
+              text: language.toUpperCase(),
+              attrs: { title: LANGUAGE_NAMES[language], 'data-testid': 'language-badge' },
+            })
+          : null,
+      ),
       subtitle && h('div', { class: 'subtitle', text: subtitle }),
       english && h('div', { class: 'english', text: english, attrs: { lang: 'en' } }),
       card && (card.type === 'Leader' || card.type === 'Base')
@@ -420,23 +475,59 @@ export function createApp(deps: AppDeps): {
 
   async function onPhoto(file: File | undefined): Promise<void> {
     if (!file) return;
-    state.scanning = 'scan.reading';
+    state.scanning = START;
     state.scanError = false;
     render();
     try {
-      const detected = await scanner.scan(file, (m) => {
-        state.scanning = m;
+      const detected = await scanner.scan(file, (p) => {
+        state.scanning = followProgress(state.scanning, p);
         render();
       });
       const items = detected
         .map((d) => reviewFromDetected(d, catalog, newId))
-        .filter((x): x is ReviewItem => x !== null);
+        .filter((x): x is ReviewItem => x !== null)
+        .map((it) => setItemLanguage(it, it.language, data.languages));
       state.review = [...state.review, ...items];
     } catch {
       state.scanError = true;
     }
     state.scanning = null;
     render();
+  }
+
+  /** La barra e i numeri della lettura in corso: cosa sta facendo, quanto manca, quante carte ha già trovato. */
+  function scanProgressView(p: ScanProgress): HTMLElement {
+    const percent = Math.round(p.fraction * 100);
+    return h(
+      'div',
+      { class: 'scan-progress', attrs: { 'data-testid': 'scan-progress' } },
+      h('p', {
+        class: 'status',
+        text: t(p.stage === 'zoom' ? 'scan.lookingCloser' : 'scan.reading'),
+        attrs: { role: 'status' },
+      }),
+      h('progress', {
+        attrs: {
+          max: '100',
+          value: String(percent),
+          'aria-label': t('scan.progress'),
+          'data-testid': 'progress-bar',
+        },
+      }),
+      h(
+        'p',
+        { class: 'note', attrs: { 'aria-hidden': 'true' } },
+        `${percent}%`,
+        p.stage === 'zoom' && p.total > 0 ? ` · ${p.done}/${p.total}` : null,
+      ),
+      p.cards !== null
+        ? h('p', {
+            class: 'note',
+            text: t('scan.foundSoFar', { n: p.cards }),
+            attrs: { 'data-testid': 'found-so-far' },
+          })
+        : null,
+    );
   }
 
   function photoButtons(compact = false): HTMLElement {
@@ -503,7 +594,7 @@ export function createApp(deps: AppDeps): {
         ? h(
             'div',
             { class: 'card-title' },
-            cardTitle(item.cardKey, item.locals[item.cardKey]),
+            cardTitle(item.cardKey, item.locals[item.cardKey], item.language),
             h('div', {
               class: item.idProduct === null ? 'hint-line' : 'muted',
               text: pickedVersionName(item) ?? t('review.chooseVersion'),
@@ -537,7 +628,8 @@ export function createApp(deps: AppDeps): {
                   attrs: { type: 'button' },
                   on: {
                     click: () => {
-                      replaceItem(resolveItem(item, { cardKey: key }));
+                      const picked = resolveItem(item, { cardKey: key });
+                      replaceItem(setItemLanguage(picked, picked.language, data.languages));
                       state.open = item.id;
                       render();
                     },
@@ -551,6 +643,10 @@ export function createApp(deps: AppDeps): {
         row.append(list);
       } else {
         row.append(
+          languagePicker(item.cardKey, item.language, (language) => {
+            replaceItem(setItemLanguage(item, language, data.languages));
+            render();
+          }),
           versionPicker(item.cardKey, item, (idProduct, finish) => {
             replaceItem(resolveItem(item, { idProduct, finish }));
             render();
@@ -607,7 +703,10 @@ export function createApp(deps: AppDeps): {
   function scanView(): HTMLElement {
     const view = h('section', { class: 'view', attrs: { 'aria-labelledby': 'scan-title' } });
     if (state.scanning) {
-      view.append(h('p', { class: 'status', text: t(state.scanning), attrs: { role: 'status' } }));
+      view.append(
+        h('h1', { class: 'sr-only', text: t('app.title'), attrs: { id: 'scan-title' } }),
+        scanProgressView(state.scanning),
+      );
       return view;
     }
     if (state.modelLoading) {
@@ -617,7 +716,7 @@ export function createApp(deps: AppDeps): {
     if (state.review.length === 0) {
       put(
         view,
-        h('h1', { class: 'app-title', text: t('app.title'), attrs: { id: 'scan-title' } }),
+        h('h1', { class: 'sr-only', text: t('app.title'), attrs: { id: 'scan-title' } }),
         h('p', { class: 'hint', text: t('scan.hint') }),
         photoButtons(),
         installCard(),
@@ -835,7 +934,7 @@ export function createApp(deps: AppDeps): {
         h(
           'div',
           { class: 'card-title' },
-          cardTitle(e.cardKey, e.local),
+          cardTitle(e.cardKey, e.local, e.language),
           h('div', {
             class: 'muted',
             text:
@@ -887,6 +986,14 @@ export function createApp(deps: AppDeps): {
     );
     if (open) {
       row.append(
+        languagePicker(e.cardKey, e.language ?? null, (language) =>
+          change(
+            updateEntry(state.list, e.id, {
+              language,
+              ...(language ? { local: localPatch(data.languages, e.cardKey, language) } : {}),
+            }),
+          ),
+        ),
         versionPicker(e.cardKey, e, (idProduct, finish) =>
           change(updateEntry(state.list, e.id, { idProduct, finish })),
         ),
@@ -914,7 +1021,13 @@ export function createApp(deps: AppDeps): {
   async function importCsv(file: File | undefined): Promise<void> {
     if (!file) return;
     const parsed = parseListCsv(await file.text());
-    const { entries, unknown } = entriesFromCsv(parsed.rows, catalog);
+    const { entries: read, unknown } = entriesFromCsv(parsed.rows, catalog);
+    const entries = read.map((e) => {
+      const local = e.language
+        ? localTitleFor(data.languages, catalog, e.cardKey, e.language)
+        : undefined;
+      return local ? { ...e, local } : e;
+    });
     let list = state.list;
     for (const e of entries) {
       for (let i = 0; i < e.quantity; i++) list = addEntry(list, e, newId);
@@ -968,7 +1081,11 @@ export function createApp(deps: AppDeps): {
   async function openShared(code: string): Promise<void> {
     deps.clearHash?.();
     try {
-      const { entries, unknown } = entriesFromShared(await decodeShare(code), catalog);
+      const { entries, unknown } = entriesFromShared(
+        await decodeShare(code),
+        catalog,
+        data.languages,
+      );
       if (entries.length === 0 && unknown === 0) throw new Error('vuota');
       const asList = mergeEntries([], entries, newId).list;
       const s = summarize(asList, (e) => catalog.priceOf(e));
@@ -1178,6 +1295,8 @@ export function createApp(deps: AppDeps): {
                       idProduct: null,
                       finish: null,
                       locals: {},
+                      languages: { [key]: data.languages.languagesOf(key) },
+                      language: null,
                     };
                     state.review = [...state.review, item];
                     state.searchOpen = false;
@@ -1400,6 +1519,18 @@ export function createApp(deps: AppDeps): {
 
   // ---------- Guscio ----------
 
+  /** Il nome dell'app, in cima a ogni schermata (anche al primo avvio). */
+  function appHeader(): HTMLElement {
+    return h(
+      'div',
+      { class: 'app-header', attrs: { 'data-testid': 'app-name' } },
+      h('img', {
+        attrs: { src: 'icons/icon-192.png', alt: '', width: '32', height: '32' },
+      }),
+      h('span', { text: t('app.title') }),
+    );
+  }
+
   function render(): void {
     const tabButton = (tab: Tab, label: MessageKey, badge?: number): HTMLElement =>
       h(
@@ -1435,7 +1566,7 @@ export function createApp(deps: AppDeps): {
     const showNav = state.setup === null || state.list.length > 0;
     root.replaceChildren(
       ...[
-        h('main', { class: 'app' }, main),
+        h('main', { class: 'app' }, appHeader(), main),
         showNav
           ? h(
               'nav',
