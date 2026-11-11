@@ -3,10 +3,12 @@ import type { LinkedCard } from '../lib/attach-links.ts';
 import type { DetectedCard } from '../lib/detect-cards.ts';
 import type { ListEntry } from '../lib/list.ts';
 import type { PriceRow } from '../lib/prices.ts';
+import type { SharedEntry } from '../lib/share.ts';
 import {
   cardKey,
   createCatalog,
   entriesFromCsv,
+  entriesFromShared,
   listToCsvRows,
   resolveItem,
   reviewFromDetected,
@@ -73,6 +75,17 @@ describe('createCatalog', () => {
       finish: 'normal',
       quantity: 1,
       ...over,
+    });
+    it('usa il prezzo ricevuto, finché la versione non cambia', () => {
+      const shared = { cents: 777, kind: 'low' as const, date: '2026-11-07' };
+      expect(catalog.priceOf(entry({ shared }))).toEqual({
+        status: 'chosen',
+        cents: 777,
+        kind: 'low',
+      });
+      expect(catalog.priceOf(entry({ idProduct: null, finish: null, shared }))).toEqual({
+        status: 'to-choose',
+      });
     });
     it('dà il prezzo di una versione scelta', () => {
       expect(catalog.priceOf(entry({}))).toEqual({ status: 'chosen', cents: 1000, kind: 'trend' });
@@ -487,5 +500,50 @@ describe('unresolvedRange', () => {
 
   it('per una lista vuota è tutto a zero', () => {
     expect(unresolvedRange([], catalog)).toEqual({ minCents: 0, maxCents: 0, noPrice: 0 });
+  });
+});
+
+describe('entriesFromShared', () => {
+  const price = { cents: 321, kind: 'trend' as const, date: '2026-11-07' };
+  const sh = (over: Partial<SharedEntry>): SharedEntry => ({
+    quantity: 1,
+    idProduct: 1,
+    finish: 'normal',
+    cardKey: null,
+    price,
+    ...over,
+  });
+
+  it('ricava la Carta dal prodotto e tiene finitura e prezzo ricevuto', () => {
+    const { entries, unknown } = entriesFromShared([sh({ quantity: 2 })], catalog);
+    expect(unknown).toBe(0);
+    expect(entries).toEqual([
+      { cardKey: vaderKey, idProduct: 1, finish: 'normal', quantity: 2, shared: price },
+    ]);
+  });
+
+  it('una voce da scegliere resta da scegliere, dalla chiave della Carta', () => {
+    const { entries } = entriesFromShared(
+      [sh({ idProduct: null, finish: null, cardKey: marineKey, price: null })],
+      catalog,
+    );
+    expect(entries).toEqual([{ cardKey: marineKey, idProduct: null, finish: null, quantity: 1 }]);
+  });
+
+  it('salta le carte che il Catalogo non conosce, contando le quantità', () => {
+    const { entries, unknown } = entriesFromShared(
+      [
+        sh({ idProduct: 424242, quantity: 2 }),
+        sh({ idProduct: null, finish: null, cardKey: 'non|esiste', price: null }),
+      ],
+      catalog,
+    );
+    expect(entries).toEqual([]);
+    expect(unknown).toBe(3);
+  });
+
+  it('un prodotto sconosciuto con la chiave giusta torna una voce da scegliere, senza prezzo', () => {
+    const { entries } = entriesFromShared([sh({ idProduct: 424242, cardKey: vaderKey })], catalog);
+    expect(entries).toEqual([{ cardKey: vaderKey, idProduct: null, finish: null, quantity: 1 }]);
   });
 });

@@ -3,14 +3,18 @@
 import type { DetectedCard } from '../lib/detect-cards.ts';
 import {
   addEntry,
+  clearSharedPrices,
+  mergeEntries,
   removeEntry,
   setQuantity,
   summarize,
   updateEntry,
   type ListEntry,
   type LocalTitle,
+  type NewEntry,
 } from '../lib/list.ts';
 import { parseListCsv, toCsv } from '../lib/list-csv.ts';
+import { decodeShare, encodeShare, shareCodeFromHash, shareUrl, toShared } from '../lib/share.ts';
 import { priceAgeDays, pricesAreStale } from '../lib/freshness.ts';
 import { thumbnailUrl } from '../lib/images.ts';
 import { formatEuro, type Finish, type Quote } from '../lib/pricing.ts';
@@ -22,6 +26,7 @@ import type { InstallHelper } from './install.ts';
 import type { MessageKey } from './messages.ts';
 import {
   entriesFromCsv,
+  entriesFromShared,
   listToCsvRows,
   resolveItem,
   reviewFromDetected,
@@ -67,6 +72,12 @@ export interface AppDeps {
   install?: InstallHelper;
   /** L'ora attuale (si può sostituire nei test). */
   now?: () => Date;
+  /** Indirizzo dell'app, base del link di condivisione (default: la pagina aperta). */
+  pageUrl?: string;
+  /** Il frammento dell'indirizzo all'apertura (`#list=...` se si è aperto un link condiviso). */
+  sharedHash?: string;
+  /** Toglie il frammento dall'indirizzo, dopo averlo letto. */
+  clearHash?: () => void;
 }
 
 type Tab = 'scan' | 'list' | 'settings';
@@ -98,6 +109,16 @@ interface State {
   /** L'ultima rimozione, che si può annullare per qualche secondo. */
   undo: { message: MessageKey; list: ListEntry[]; review: ReviewItem[] } | null;
   installDismissed: boolean;
+  /** Una Lista ricevuta con un link, in attesa della scelta dell'utente. */
+  shared: {
+    error: boolean;
+    entries: (NewEntry & { quantity: number })[];
+    unknown: number;
+    cards: number;
+    totalCents: number;
+    /** Data dei prezzi ricevuti (la più recente), se ce ne sono. */
+    date: string | null;
+  } | null;
 }
 
 const INSTALL_KEY = 'swu-scanner:install-dismissed';
@@ -113,7 +134,12 @@ function read(store: KV | null, key: string): string | null {
 
 const CARDMARKET = 'https://www.cardmarket.com/en/StarWarsUnlimited/Products?idProduct=';
 
-export function createApp(deps: AppDeps): { destroy(): void; refresh(): void } {
+export function createApp(deps: AppDeps): {
+  destroy(): void;
+  refresh(): void;
+  /** Apre la Lista di un link toccato mentre l'app è già aperta. */
+  openSharedHash(hash: string): void;
+} {
   const { root, data, scanner, storage } = deps;
   const { catalog } = data;
   let counter = 0;
@@ -137,6 +163,7 @@ export function createApp(deps: AppDeps): { destroy(): void; refresh(): void } {
     showRange: false,
     undo: null,
     installDismissed: read(storage, INSTALL_KEY) === '1',
+    shared: null,
   };
 
   let t: Translate;
@@ -590,7 +617,7 @@ export function createApp(deps: AppDeps): { destroy(): void; refresh(): void } {
     if (state.review.length === 0) {
       put(
         view,
-        h('h1', { class: 'sr-only', text: t('app.title'), attrs: { id: 'scan-title' } }),
+        h('h1', { class: 'app-title', text: t('app.title'), attrs: { id: 'scan-title' } }),
         h('p', { class: 'hint', text: t('scan.hint') }),
         photoButtons(),
         installCard(),
@@ -717,6 +744,23 @@ export function createApp(deps: AppDeps): { destroy(): void; refresh(): void } {
         }),
         h('button', {
           class: 'secondary',
+          text: t('list.share'),
+          attrs: {
+            type: 'button',
+            'data-testid': 'share',
+            ...(state.list.length === 0 ? { disabled: '' } : {}),
+          },
+          on: { click: () => void shareList() },
+        }),
+        state.list.some((e) => e.shared) &&
+          h('button', {
+            class: 'secondary',
+            text: t('list.updatePrices'),
+            attrs: { type: 'button', 'data-testid': 'update-prices' },
+            on: { click: () => change(clearSharedPrices(state.list)) },
+          }),
+        h('button', {
+          class: 'secondary',
           text: t('list.importCsv'),
           attrs: { type: 'button' },
           on: { click: () => importInput.click() },
@@ -794,7 +838,9 @@ export function createApp(deps: AppDeps): { destroy(): void; refresh(): void } {
           cardTitle(e.cardKey, e.local),
           h('div', {
             class: 'muted',
-            text: version ? versionName(version) : t('review.chooseVersion'),
+            text:
+              (version ? versionName(version) : t('review.chooseVersion')) +
+              (e.shared ? ` · ${t('list.sharedPrice', { date: dateText(e.shared.date) })}` : ''),
           }),
         ),
         price.status === 'chosen'
@@ -878,6 +924,156 @@ export function createApp(deps: AppDeps): { destroy(): void; refresh(): void } {
     state.notice =
       [...parsed.errors, ...unknown.map((u) => `? ${u}`)].slice(0, 5).join(' · ') || null;
     render();
+  }
+
+  // ---------- Condivisione ----------
+
+  const dateText = (iso: string): string => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '?' : d.toLocaleDateString(locale);
+  };
+
+  /** Il link della Lista, con i prezzi di ora: si condivide dal telefono o si copia negli appunti. */
+  async function shareList(): Promise<void> {
+    if (state.list.length === 0) return;
+    state.notice = null;
+    try {
+      const code = await encodeShare(
+        toShared(state.list, (e) => catalog.priceOf(e), data.priceDate),
+      );
+      const url = shareUrl(deps.pageUrl ?? window.location.href, code);
+      const s = summarize(state.list, (e) => catalog.priceOf(e));
+      if (typeof navigator.share === 'function') {
+        try {
+          await navigator.share({
+            title: t('app.title'),
+            text: t('share.text', { n: s.cards, price: formatEuro(s.totalCents, locale) }),
+            url,
+          });
+          return;
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') return; // l'utente ha chiuso il foglio
+          // altro errore: si ripiega sugli appunti
+        }
+      }
+      await navigator.clipboard.writeText(url);
+      state.notice = t('share.copied');
+    } catch {
+      state.notice = t('share.failed');
+    }
+    render();
+  }
+
+  /** Legge una Lista ricevuta con un link e chiede cosa farne. */
+  async function openShared(code: string): Promise<void> {
+    deps.clearHash?.();
+    try {
+      const { entries, unknown } = entriesFromShared(await decodeShare(code), catalog);
+      if (entries.length === 0 && unknown === 0) throw new Error('vuota');
+      const asList = mergeEntries([], entries, newId).list;
+      const s = summarize(asList, (e) => catalog.priceOf(e));
+      const dates = entries.flatMap((e) => (e.shared ? [e.shared.date] : []));
+      state.shared = {
+        error: false,
+        entries,
+        unknown,
+        cards: s.cards,
+        totalCents: s.totalCents,
+        date:
+          dates.length > 0
+            ? dates.reduce((a, b) => (Date.parse(a) >= Date.parse(b) ? a : b))
+            : null,
+      };
+    } catch {
+      state.shared = { error: true, entries: [], unknown: 0, cards: 0, totalCents: 0, date: null };
+    }
+    render();
+  }
+
+  function importShared(mode: 'add' | 'replace'): void {
+    const shared = state.shared;
+    if (!shared) return;
+    offerUndo('undo.shared', { list: state.list, review: state.review });
+    const base = mode === 'replace' ? [] : state.list;
+    const merged = mergeEntries(base, shared.entries, newId);
+    state.list = merged.list;
+    persistList();
+    state.shared = null;
+    state.tab = 'list';
+    state.open = null;
+    state.notice =
+      mode === 'add' && merged.merged > 0 ? t('share.merged', { n: merged.merged }) : null;
+    render();
+  }
+
+  function sharedDialog(): HTMLElement {
+    const shared = state.shared as NonNullable<State['shared']>;
+    const canImport = shared.entries.length > 0;
+    const already = canImport ? mergeEntries(state.list, shared.entries, newId).merged : 0;
+    const close = (): void => {
+      state.shared = null;
+      render();
+    };
+    const primary = canImport
+      ? h('button', {
+          class: 'primary',
+          text: t('share.add'),
+          attrs: { type: 'button', 'data-testid': 'share-add' },
+          on: { click: () => importShared('add') },
+        })
+      : null;
+    if (primary) queueMicrotask(() => primary.focus());
+    return h(
+      'div',
+      {
+        class: 'overlay',
+        attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': t('share.title') },
+      },
+      h(
+        'div',
+        { class: 'dialog', attrs: { 'data-testid': 'share-dialog' } },
+        h('h2', { class: 'section-title', text: t('share.title') }),
+        shared.error
+          ? h('p', { class: 'error', text: t('share.invalid'), attrs: { role: 'alert' } })
+          : null,
+        canImport
+          ? h('p', {
+              class: 'total',
+              text: t('share.summary', {
+                n: shared.cards,
+                price: formatEuro(shared.totalCents, locale),
+              }),
+              attrs: { 'data-testid': 'share-summary' },
+            })
+          : null,
+        shared.date
+          ? h('p', { class: 'note', text: t('price.updated', { date: dateText(shared.date) }) })
+          : null,
+        already > 0 ? h('p', { class: 'note', text: t('share.merged', { n: already }) }) : null,
+        shared.unknown > 0
+          ? h('p', {
+              class: 'note warn',
+              text: t('share.unknown', { n: shared.unknown }),
+              attrs: { 'data-testid': 'share-unknown' },
+            })
+          : null,
+        primary,
+        canImport && state.list.length > 0
+          ? h('button', {
+              class: 'secondary',
+              text: t('share.replace'),
+              attrs: { type: 'button', 'data-testid': 'share-replace' },
+              on: { click: () => importShared('replace') },
+            })
+          : null,
+        h('button', {
+          class: 'secondary',
+          text: canImport ? t('share.cancel') : t('common.close'),
+          attrs: { type: 'button', 'data-testid': 'share-cancel' },
+          on: { click: close },
+        }),
+      ),
+    );
   }
 
   // ---------- Impostazioni ----------
@@ -1226,36 +1422,50 @@ export function createApp(deps: AppDeps): { destroy(): void; refresh(): void } {
         t(label),
         badge ? h('span', { class: 'tab-badge', text: String(badge) }) : null,
       );
-    if (state.setup) {
-      root.replaceChildren(h('main', { class: 'app' }, setupView(state.setup)));
-      return;
-    }
-    const main =
-      state.tab === 'scan' ? scanView() : state.tab === 'list' ? listView() : settingsView();
+    // Il primo avvio (scelta e scaricamento del modello) riguarda solo la scheda Scansiona: una Lista
+    // ricevuta con un link si vede anche prima, e la barra compare appena la Lista ha delle voci.
+    const gated = state.setup !== null && state.tab === 'scan';
+    const main = gated
+      ? setupView(state.setup as NonNullable<State['setup']>)
+      : state.tab === 'scan'
+        ? scanView()
+        : state.tab === 'list'
+          ? listView()
+          : settingsView();
+    const showNav = state.setup === null || state.list.length > 0;
     root.replaceChildren(
       ...[
         h('main', { class: 'app' }, main),
-        h(
-          'nav',
-          { class: 'tabs', attrs: { 'aria-label': t('app.title') } },
-          tabButton('scan', 'nav.scan'),
-          tabButton(
-            'list',
-            'nav.list',
-            state.list.reduce((n, e) => n + e.quantity, 0),
-          ),
-          tabButton('settings', 'nav.settings'),
-        ),
+        showNav
+          ? h(
+              'nav',
+              { class: 'tabs', attrs: { 'aria-label': t('app.title') } },
+              tabButton('scan', 'nav.scan'),
+              tabButton(
+                'list',
+                'nav.list',
+                state.list.reduce((n, e) => n + e.quantity, 0),
+              ),
+              state.setup === null ? tabButton('settings', 'nav.settings') : null,
+            )
+          : null,
         state.undo ? toast() : null,
-        state.searchOpen ? searchDialog() : null,
+        state.searchOpen && state.setup === null ? searchDialog() : null,
+        state.shared ? sharedDialog() : null,
       ].filter((n): n is HTMLElement => n !== null),
     );
   }
 
   render();
+  const sharedCode = deps.sharedHash ? shareCodeFromHash(deps.sharedHash) : null;
+  if (sharedCode) void openShared(sharedCode);
   void bootstrapModels();
   return {
     destroy: () => root.replaceChildren(),
     refresh: () => render(),
+    openSharedHash: (hash) => {
+      const code = shareCodeFromHash(hash);
+      if (code) void openShared(code);
+    },
   };
 }

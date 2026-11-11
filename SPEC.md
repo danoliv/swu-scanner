@@ -68,7 +68,7 @@ Carte non riconosciute e "da scegliere": vedi sezione 5.
 
 ## 6. Lista
 
-- Sul telefono (non su un server); **esportazione e importazione CSV**; all'installazione si chiede al browser di non cancellare i dati. Formato del CSV: da definire in implementazione.
+- Sul telefono (non su un server); **esportazione e importazione CSV**; **condivisione della Lista come link** (`#list=` nel frammento dell'indirizzo, voci e prezzi in JSON compresso; chi lo apre conferma se aggiungere o sostituire, e i prezzi ricevuti restano fissi, con la loro data, finché non preme «Aggiorna prezzi»); all'installazione si chiede al browser di non cancellare i dati. Formato del CSV: da definire in implementazione.
 - Ogni riga è (Carta, Prodotto, finitura scelta) con quantità; una Carta senza versione scelta resta "da scegliere".
 - Fuori ambito: condizione della carta, storico dei prezzi, sincronizzazione tra dispositivi.
 

@@ -7,6 +7,7 @@ import type { Finish } from '../lib/pricing.ts';
 import type { PriceRow } from '../lib/prices.ts';
 import type { CsvListRow } from '../lib/list-csv.ts';
 import { normalize } from '../lib/text-match.ts';
+import type { SharedEntry } from '../lib/share.ts';
 import { buildVersions, type Version } from '../lib/versions.ts';
 
 export const cardKey = (name: string, subtitle: string | null): string =>
@@ -45,6 +46,9 @@ export function createCatalog(
     cardOfProduct: (id) => productCard.get(id),
     versionsOf,
     priceOf(entry) {
+      if (entry.shared && entry.idProduct !== null) {
+        return { status: 'chosen', cents: entry.shared.cents, kind: entry.shared.kind };
+      }
       if (entry.idProduct === null) return { status: 'to-choose' };
       const version = versionsOf(entry.cardKey).find((v) => v.idProduct === entry.idProduct);
       if (!version) return { status: 'to-choose' };
@@ -242,4 +246,31 @@ export function unresolvedRange(
     out.maxCents += Math.max(...prices) * e.quantity;
   }
   return out;
+}
+
+/** Le voci di una Lista condivisa nel Catalogo di questo sito; `unknown` conta le carte non trovate. */
+export function entriesFromShared(
+  shared: readonly SharedEntry[],
+  catalog: Catalog,
+): { entries: (NewEntry & { quantity: number })[]; unknown: number } {
+  const entries: (NewEntry & { quantity: number })[] = [];
+  let unknown = 0;
+  for (const s of shared) {
+    const byProduct = s.idProduct !== null ? catalog.cardOfProduct(s.idProduct) : undefined;
+    const key =
+      byProduct ?? (s.cardKey !== null && catalog.card(s.cardKey) ? s.cardKey : undefined);
+    if (!key) {
+      unknown += s.quantity;
+      continue;
+    }
+    const keepProduct = s.idProduct !== null && byProduct === key;
+    entries.push({
+      cardKey: key,
+      idProduct: keepProduct ? s.idProduct : null,
+      finish: keepProduct ? s.finish : null,
+      quantity: s.quantity,
+      ...(keepProduct && s.price ? { shared: s.price } : {}),
+    });
+  }
+  return { entries, unknown };
 }

@@ -51,13 +51,25 @@ function validLocal(l: unknown): l is NonNullable<ListEntry['local']> {
   return typeof x.name === 'string' && (x.subtitle === null || typeof x.subtitle === 'string');
 }
 
+function validShared(p: unknown): p is NonNullable<ListEntry['shared']> {
+  if (typeof p !== 'object' || p === null) return false;
+  const x = p as Record<string, unknown>;
+  return (
+    typeof x.cents === 'number' &&
+    Number.isInteger(x.cents) &&
+    x.cents >= 0 &&
+    (x.kind === 'trend' || x.kind === 'low') &&
+    typeof x.date === 'string'
+  );
+}
+
 export function loadList(store: KV | null): ListEntry[] {
   const data = read(store, LIST_KEY);
   if (!Array.isArray(data)) return [];
   return data.filter(validEntry).map((e) => {
-    if (e.local === undefined || validLocal(e.local)) return e;
     const clean: ListEntry = { ...e };
-    delete clean.local;
+    if (clean.local !== undefined && !validLocal(clean.local)) delete clean.local;
+    if (clean.shared !== undefined && !validShared(clean.shared)) delete clean.shared;
     return clean;
   });
 }

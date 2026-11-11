@@ -8,6 +8,14 @@ export interface LocalTitle {
   subtitle: string | null;
 }
 
+/** Il prezzo ricevuto con una Lista condivisa: resta fisso, con la sua data, finché non si aggiornano i prezzi. */
+export interface SharedPrice {
+  cents: number;
+  kind: 'trend' | 'low';
+  /** Data dei prezzi di chi ha condiviso (ISO). */
+  date: string;
+}
+
 export interface ListEntry {
   id: string;
   /** Chiave della Carta nel Catalogo (titolo e sottotitolo). */
@@ -18,9 +26,13 @@ export interface ListEntry {
   finish: Finish | null;
   quantity: number;
   local?: LocalTitle;
+  shared?: SharedPrice;
 }
 
-export type NewEntry = Pick<ListEntry, 'cardKey' | 'idProduct' | 'finish'> & { local?: LocalTitle };
+export type NewEntry = Pick<ListEntry, 'cardKey' | 'idProduct' | 'finish'> & {
+  local?: LocalTitle;
+  shared?: SharedPrice;
+};
 
 const MAX_QUANTITY = 999;
 
@@ -41,6 +53,41 @@ export function addEntry(
   return [...list, { id: newId(), ...entry, quantity: 1 }];
 }
 
+/**
+ * Unisce voci con quantità (da una Lista condivisa): se la versione c'è già si sommano le quantità e
+ * resta il prezzo della voce esistente. `merged` conta le voci già presenti.
+ */
+export function mergeEntries(
+  list: readonly ListEntry[],
+  incoming: readonly (NewEntry & { quantity: number })[],
+  newId: () => string,
+): { list: ListEntry[]; merged: number } {
+  let out = [...list];
+  let merged = 0;
+  for (const { quantity, ...entry } of incoming) {
+    const existing = out.find((e) => sameVersion(e, entry));
+    if (existing) {
+      merged++;
+      out = out.map((e) =>
+        e === existing ? { ...e, quantity: Math.min(MAX_QUANTITY, e.quantity + quantity) } : e,
+      );
+    } else {
+      out.push({ id: newId(), ...entry, quantity: Math.min(MAX_QUANTITY, quantity) });
+    }
+  }
+  return { list: out, merged };
+}
+
+/** Toglie i prezzi ricevuti: da ora le voci usano i prezzi di questo sito. */
+export function clearSharedPrices(list: readonly ListEntry[]): ListEntry[] {
+  return list.map((e) => {
+    if (!e.shared) return e;
+    const rest: ListEntry = { ...e };
+    delete rest.shared;
+    return rest;
+  });
+}
+
 /** Cambia versione o finitura di una voce; se ne esiste già una uguale, le unisce sommando le quantità. */
 export function updateEntry(
   list: readonly ListEntry[],
@@ -50,6 +97,8 @@ export function updateEntry(
   const target = list.find((e) => e.id === id);
   if (!target) return [...list];
   const changed: ListEntry = { ...target, ...patch };
+  // Con un'altra versione o finitura il prezzo ricevuto non vale più.
+  delete changed.shared;
   const twin = list.find((e) => e.id !== id && sameVersion(e, changed));
   if (!twin) return list.map((e) => (e.id === id ? changed : e));
   return list

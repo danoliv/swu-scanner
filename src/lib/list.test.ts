@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   addEntry,
+  clearSharedPrices,
+  mergeEntries,
   removeEntry,
   setQuantity,
   summarize,
@@ -150,5 +152,40 @@ describe('summarize', () => {
       unavailable: 0,
       cards: 0,
     });
+  });
+});
+
+describe('Lista condivisa', () => {
+  const price = { cents: 500, kind: 'trend' as const, date: '2026-11-07' };
+  const mk = (over: Partial<ListEntry>): ListEntry => ({ id: 'a', ...base, quantity: 1, ...over });
+
+  it('mergeEntries somma le voci già presenti e tiene il loro prezzo', () => {
+    const own = mk({ quantity: 2 });
+    const out = mergeEntries([own], [{ ...base, quantity: 3, shared: price }], newId);
+    expect(out.merged).toBe(1);
+    expect(out.list).toEqual([{ ...own, quantity: 5 }]);
+  });
+
+  it('mergeEntries aggiunge le voci nuove con il prezzo ricevuto', () => {
+    const out = mergeEntries([], [{ ...base, quantity: 2, shared: price }], newId);
+    expect(out.merged).toBe(0);
+    expect(out.list).toHaveLength(1);
+    expect(out.list[0]).toMatchObject({ quantity: 2, shared: price });
+  });
+
+  it('mergeEntries non supera 999 carte', () => {
+    const out = mergeEntries([mk({ quantity: 998 })], [{ ...base, quantity: 5 }], newId);
+    expect(out.list[0]?.quantity).toBe(999);
+  });
+
+  it('cambiare versione toglie il prezzo ricevuto', () => {
+    const out = updateEntry([mk({ shared: price })], 'a', { idProduct: 200 });
+    expect(out[0]?.shared).toBeUndefined();
+  });
+
+  it('clearSharedPrices toglie i prezzi ricevuti e lascia il resto', () => {
+    const out = clearSharedPrices([mk({ shared: price }), mk({ id: 'b' })]);
+    expect(out.every((e) => e.shared === undefined)).toBe(true);
+    expect(out.map((e) => e.id)).toEqual(['a', 'b']);
   });
 });

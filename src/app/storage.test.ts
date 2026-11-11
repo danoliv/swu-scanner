@@ -36,6 +36,16 @@ describe('lista', () => {
     expect(loadList(memory({ 'swu-scanner:list:v1': '{non json' }))).toEqual([]);
     expect(loadList(memory({ 'swu-scanner:list:v1': '{"a":1}' }))).toEqual([]);
   });
+  it('tiene il prezzo ricevuto valido e ignora quello malformato', () => {
+    const shared = { cents: 250, kind: 'low', date: '2026-11-07' };
+    const store = memory();
+    saveList(store, [{ ...entry, shared } as ListEntry]);
+    expect(loadList(store)[0]?.shared).toEqual(shared);
+    const bad = memory({
+      'swu-scanner:list:v1': JSON.stringify([{ ...entry, shared: { cents: -1, kind: 'x' } }]),
+    });
+    expect(loadList(bad)).toEqual([entry]);
+  });
   it('tiene il titolo locale valido e ignora quello malformato', () => {
     const store = memory({
       'swu-scanner:list:v1': JSON.stringify([

@@ -101,9 +101,14 @@ loadData(base)
       scanner: window.__swuScanner ?? engine?.scanner ?? unavailable,
       ...(engine && !window.__swuScanner ? { models: engine.models } : {}),
       storage: store,
+      pageUrl: `${window.location.origin}${base}`,
+      sharedHash: window.location.hash,
+      clearHash: () =>
+        window.history.replaceState(null, '', window.location.pathname + window.location.search),
       languages: navigator.languages?.length ? navigator.languages : [navigator.language],
     });
     rerender = app.refresh;
+    window.addEventListener('hashchange', () => app.openSharedHash(window.location.hash));
   })
   .catch(() => {
     root.textContent = 'Could not load the card data. Check your connection and reload.';

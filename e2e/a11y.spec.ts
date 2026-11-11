@@ -49,6 +49,18 @@ for (const scheme of ['dark', 'light'] as const) {
       await audit(page, 'lista con intervallo e annulla');
     });
 
+    test('lista condivisa da importare', async ({ page, context }) => {
+      await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+      await scanAndConfirmAll(page);
+      await page.getByTestId('share').click();
+      await expect(page.getByText('Link copied')).toBeVisible();
+      await audit(page, 'lista con link copiato');
+      const link = await page.evaluate(() => navigator.clipboard.readText());
+      await page.goto(link);
+      await expect(page.getByTestId('share-dialog')).toBeVisible();
+      await audit(page, 'lista condivisa');
+    });
+
     test('lista vuota', async ({ page }) => {
       await page.getByTestId('tab-list').click();
       await audit(page, 'lista vuota');
