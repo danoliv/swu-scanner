@@ -8,6 +8,12 @@ Runs entirely in the browser, installs like an app and works offline.
 > Unofficial fan project, not affiliated with Lucasfilm, Disney, Fantasy Flight Games or Cardmarket.
 > See [NOTICE.md](NOTICE.md).
 
+## Demo
+
+[![SWU Scanner demo: scan a photo, review the cards, change their language, share the list](docs/demo-poster.png)](docs/demo.mp4)
+
+_One-minute narrated demo (click to play): scan, review, language, versions and prices, list, share._
+
 ## What it does
 
 - **Scan** a photo with many cards at once (camera or gallery). Cards are recognized from the title and
@@ -15,7 +21,10 @@ Runs entirely in the browser, installs like an app and works offline.
 - **Review** every card before it enters your list. The app never picks a version silently: you choose
   among all the versions of the card (standard, foil, hyperspace, prestige, promos…), each with its price,
   a thumbnail and a link to Cardmarket.
-- **List** with a running total, quantities, undo, and CSV export and import.
+- **Language of the card** shown next to every title (FR, EN…), and editable: the same card in two
+  languages is two entries.
+- **List** with a running total, quantities, undo, CSV export and import, and **sharing as a link** that
+  carries the cards and their prices.
 - **Add a card by hand** with a search that works in any of the five languages, for the cards the scan
   could not read.
 - Interface in English, French, German, Spanish and Italian, light and dark theme, accessible

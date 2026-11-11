@@ -1,0 +1,10 @@
+[
+  "This is SWU Scanner, a Star Wars: Unlimited card scanner that runs entirely in your browser. Take a photo of your cards and get a priced list in euros.",
+  "I pick a photo with nine cards. The app reads it right on the device, and shows a progress bar and how many cards it has found so far.",
+  "Here are the nine cards it found. Each one shows its language, mostly French here, with the English title underneath.",
+  "If the language is wrong, open the card and change it. The title follows the language you pick.",
+  "Then choose the printing, and the Cardmarket price appears, in euros.",
+  "Add everything to the list, and the total updates. Cards that still need a version are counted separately.",
+  "Finally, share the list as a link. The prices travel with it, so whoever opens the link sees exactly the same totals.",
+  "That's SWU Scanner. It's free, installable, and works offline."
+]
